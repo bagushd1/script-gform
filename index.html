@@ -5,23 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>War GForm Timer</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 440px; margin: 30px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 460px; margin: 30px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
     label { font-weight: 600; display: block; margin-top: 14px; font-size: 14px; }
     input, textarea, button { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
     .row { display: flex; gap: 8px; }
     button { margin-top: 20px; background: #0b57d0; color: #fff; font-weight: bold; border: none; cursor: pointer; }
     button:disabled { background: #aaa; cursor: not-allowed; }
     #status { margin-top: 15px; font-size: 14px; padding: 10px; background: #f0f4f9; border-radius: 4px; }
+    details { margin-top: 10px; font-size: 13px; color: #333; }
+    summary { cursor: pointer; font-weight: 600; color: #0b57d0; }
+    .help-box { background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 6px; border: 1px solid #e0e0e0; }
+    .btn-secondary { background: #555; color: #fff; margin-top: 6px; padding: 6px; font-size: 12px; }
   </style>
 </head>
 <body>
   <h2 style="margin-top:0;">War GForm Timer</h2>
 
-  <label for="url">URL Google Form:</label>
-  <input id="url" placeholder="https://docs.google.com/forms/d/e/.../viewform">
+  <label for="url">URL Google Form (Bisa link biasa atau Pre-filled Link):</label>
+  <input id="url" placeholder="https://docs.google.com/forms/d/e/.../viewform" oninput="handleUrlInput(this.value)">
 
   <label for="entries">Data Entry (Format: entry.ID=Nilai):</label>
   <textarea id="entries" rows="4" placeholder="entry.123456=Budi Santoso&#10;entry.987654=Senin"></textarea>
+
+  <details>
+    <summary>Bantuan: Cara Cepat & Otomatis Dapatkan Entry ID</summary>
+    <div class="help-box">
+      <p style="margin: 0 0 6px 0;"><strong>Opsi 1 (Paling Mudah):</strong> Buat <em>Pre-filled link</em> di Google Form (Titik tiga &gt; <em>Dapatkan link yang sudah terisi</em> &gt; isi &gt; salin link). Paste link tersebut ke kolom URL di atas, data entry langsung terisi otomatis.</p>
+      <p style="margin: 0 0 4px 0;"><strong>Opsi 2 (Console 1-Baris):</strong> Di tab Google Form, tekan F12 &gt; Console &gt; jalankan kode ini (otomatis salin ke clipboard):</p>
+      <code style="display:block; background:#eee; padding:4px 6px; border-radius:3px; word-break:break-all; font-size:11px;">copy(FB_PUBLIC_LOAD_DATA_[1][1].map(q=>'entry.'+q[4][0][0]+'= // '+q[1]).join('\n'))</code>
+      <p style="margin: 8px 0 4px 0;"><strong>Opsi 3 (Paste Source Form):</strong> Buka form &gt; tekan Ctrl+U &gt; Ctrl+A &gt; Ctrl+C. Paste ke bawah ini:</p>
+      <textarea id="source_input" rows="2" placeholder="Paste source code Google Form (Ctrl+U) di sini..." style="font-size:12px;"></textarea>
+      <button type="button" class="btn-secondary" onclick="extractFromSource()">Ekstrak ID dari Source</button>
+    </div>
+  </details>
 
   <label>Waktu Tembak (Jam : Menit : Detik):</label>
   <div class="row">
@@ -44,11 +60,68 @@
       return url.trim().replace(/\/viewform(\?.*)?$/, "/formResponse");
     }
 
+    function extractPrefilled(url) {
+      try {
+        const u = new URL(url.trim());
+        const entries = [];
+        u.searchParams.forEach((val, key) => {
+          if (key.startsWith("entry.")) {
+            entries.push(`${key}=${val}`);
+          }
+        });
+        if (entries.length === 0) return null;
+        return {
+          cleanUrl: `${u.origin}${u.pathname}`,
+          entriesText: entries.join("\n")
+        };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function parseSourceEntries(source) {
+      const match = source.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+      if (!match) return null;
+      try {
+        const data = JSON.parse(match[1]);
+        const items = data[1][1];
+        return items.map(q => {
+          const entryId = q[4] && q[4][0] && q[4][0][0];
+          return entryId ? `entry.${entryId}= // ${q[1]}` : null;
+        }).filter(Boolean).join("\n");
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function handleUrlInput(val) {
+      if (val.includes("entry.")) {
+        const res = extractPrefilled(val);
+        if (res && res.entriesText) {
+          document.getElementById("entries").value = res.entriesText;
+          document.getElementById("status").innerText = "Data entry otomatis diekstrak dari Pre-filled link!";
+        }
+      }
+    }
+
+    function extractFromSource() {
+      const src = document.getElementById("source_input").value;
+      const res = parseSourceEntries(src);
+      if (res) {
+        document.getElementById("entries").value = res;
+        document.getElementById("status").innerText = "Berhasil mengekstrak entry ID dari source!";
+      } else {
+        alert("Gagal menemukan data form pada source yang dimasukkan.");
+      }
+    }
+
     function parseEntries(text) {
       return text.trim().split("\n").map(l => {
-        const idx = l.indexOf("=");
+        const commentIdx = l.indexOf("//");
+        const cleanLine = commentIdx !== -1 ? l.slice(0, commentIdx) : l;
+        const idx = cleanLine.indexOf("=");
         if (idx === -1) return null;
-        return [l.slice(0, idx).trim(), l.slice(idx + 1).trim()];
+        return [cleanLine.slice(0, idx).trim(), cleanLine.slice(idx + 1).trim()];
       }).filter(Boolean);
     }
 
@@ -88,7 +161,7 @@
 
     // Expose for node test if running in test environment
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { normalizeUrl, parseEntries };
+      module.exports = { normalizeUrl, parseEntries, extractPrefilled, parseSourceEntries };
     }
   </script>
 </body>
