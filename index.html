@@ -57,6 +57,21 @@
   <script>
     let timer = null;
     let loadedFields = [];
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request("screen");
+        } catch (e) {}
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock) {
+        wakeLock.release().then(() => { wakeLock = null; }).catch(() => {});
+      }
+    }
 
     function normalizeUrl(url) {
       return url.trim().replace(/\/viewform(\?.*)?$/, "/formResponse");
@@ -190,11 +205,14 @@
       const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Menunggu pukul <strong>${targetTimeStr}</strong>...`;
 
+      requestWakeLock();
+
       timer = setInterval(() => {
         const now = new Date();
         if (now.getHours() === h && now.getMinutes() === m && now.getSeconds() >= s) {
           clearInterval(timer);
           form.submit();
+          releaseWakeLock();
           statusEl.className = "sent";
           statusEl.innerHTML = `&#10004; <strong>Terkirim!</strong> Form telah otomatis di-submit ke server Google.`;
         }
