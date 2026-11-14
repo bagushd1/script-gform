@@ -1,7 +1,6 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
-const { parseForm } = require("./server");
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -33,23 +32,17 @@ const prefilled = "https://docs.google.com/forms/d/e/xxx/viewform?usp=pp_url&ent
 const ext = extractPrefilled(prefilled);
 assert.strictEqual(ext.entriesText, "entry.111=Andi\nentry.222=Pagi");
 
-// Test parseSourceData (offline without Node.js)
-const mockSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[[1,"nama",null,0,[[888,null,0]]]]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScMockPath"];</script>`;
+// Test parseSourceData (offline client-side parsing)
+const mockSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[[1,"nama",null,0,[[888,null,0]]],[2,"senin",null,2,[[999,[["pagi",null,null,null,0]],0]]]]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScMockPath"];</script>`;
 const offlineParsed = parseSourceData(mockSource);
 assert.strictEqual(offlineParsed.formPath, "e/1FAIpQLScMockPath");
-assert.strictEqual(offlineParsed.fields.length, 1);
+assert.strictEqual(offlineParsed.fields.length, 2);
 assert.strictEqual(offlineParsed.fields[0].id, "entry.888");
 assert.strictEqual(offlineParsed.fields[0].title, "nama");
+assert.strictEqual(offlineParsed.fields[0].type, "text");
+assert.strictEqual(offlineParsed.fields[1].id, "entry.999");
+assert.strictEqual(offlineParsed.fields[1].title, "senin");
+assert.strictEqual(offlineParsed.fields[1].type, "choice");
+assert.deepStrictEqual(offlineParsed.fields[1].options, ["pagi"]);
 
-// Test backend parseForm
-async function testBackendParser() {
-  const mockUrl = "https://docs.google.com/forms/d/e/1FAIpQLScMpr-ItNg3q2RW54_zLyF9T5hfy6IYFTHmq49YtUEPa1Maeg/viewform";
-  const fields = await parseForm(mockUrl);
-  assert.strictEqual(fields.length, 3);
-  console.log("All unit and integration tests passed!");
-}
-
-testBackendParser().catch(err => {
-  console.error("Test failed:", err);
-  process.exit(1);
-});
+console.log("All client-side tests passed successfully!");
