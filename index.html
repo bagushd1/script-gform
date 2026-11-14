@@ -135,6 +135,14 @@
       }
     }
 
+    function toggleOther(selectEl, id) {
+      const otherInput = document.getElementById(`other_${id}`);
+      if (!otherInput) return;
+      const isOther = selectEl.value === "__other__" || /^lainnya|^other/i.test(selectEl.value.trim());
+      otherInput.style.display = isOther ? "block" : "none";
+      if (isOther) otherInput.focus();
+    }
+
     function renderDynamicFields(fields) {
       loadedFields = fields;
       const container = document.getElementById("fields-container");
@@ -152,9 +160,18 @@
         if (f.type === "choice" && Array.isArray(f.options)) {
           const select = document.createElement("select");
           select.id = `input_${f.id}`;
+          select.onchange = () => toggleOther(select, f.id);
           select.innerHTML = `<option value="">-- Pilih opsi --</option>` +
-            f.options.map(opt => `<option value="${opt}">${opt}</option>`).join("");
+            f.options.map(opt => `<option value="${opt}">${opt}</option>`).join("") +
+            `<option value="__other__">-- Lainnya (Isi teks sendiri) --</option>`;
           group.appendChild(select);
+
+          const otherInput = document.createElement("input");
+          otherInput.id = `other_${f.id}`;
+          otherInput.placeholder = `Ketik jawaban '${f.title}' lainnya di sini...`;
+          otherInput.style.display = "none";
+          otherInput.style.marginTop = "6px";
+          group.appendChild(otherInput);
         } else {
           const input = document.createElement("input");
           input.id = `input_${f.id}`;
@@ -172,7 +189,21 @@
       const entries = [];
       for (const f of loadedFields) {
         const el = document.getElementById(`input_${f.id}`);
-        if (el && el.value.trim() !== "") {
+        if (!el) continue;
+
+        if (el.tagName === "SELECT") {
+          const isOther = el.value === "__other__" || /^lainnya|^other/i.test(el.value.trim());
+          if (isOther) {
+            const otherEl = document.getElementById(`other_${f.id}`);
+            const otherVal = otherEl ? otherEl.value.trim() : "";
+            if (otherVal !== "") {
+              entries.push([f.id, "__other_option__"]);
+              entries.push([`${f.id}.other_option_response`, otherVal]);
+            }
+          } else if (el.value.trim() !== "") {
+            entries.push([f.id, el.value.trim()]);
+          }
+        } else if (el.value.trim() !== "") {
           entries.push([f.id, el.value.trim()]);
         }
       }

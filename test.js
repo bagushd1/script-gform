@@ -36,4 +36,34 @@ assert.strictEqual(parsed.fields[1].title, "senin");
 assert.strictEqual(parsed.fields[1].type, "choice");
 assert.deepStrictEqual(parsed.fields[1].options, ["pagi", "sore"]);
 
-console.log("All unit tests passed!");
+// Test Other option payload generation logic
+function mockGetEntries(fields, domValues) {
+  const entries = [];
+  for (const f of fields) {
+    const val = domValues[f.id] || "";
+    const isOther = val === "__other__" || /^lainnya|^other/i.test(val.trim());
+    if (isOther) {
+      const otherVal = (domValues[`other_${f.id}`] || "").trim();
+      if (otherVal !== "") {
+        entries.push([f.id, "__other_option__"]);
+        entries.push([`${f.id}.other_option_response`, otherVal]);
+      }
+    } else if (val.trim() !== "") {
+      entries.push([f.id, val.trim()]);
+    }
+  }
+  return entries;
+}
+
+const testDom = {
+  "entry.888": "Budi",
+  "entry.999": "__other__",
+  "other_entry.999": "Malam Hari"
+};
+const resultEntries = mockGetEntries(parsed.fields, testDom);
+assert.strictEqual(resultEntries.length, 3);
+assert.deepStrictEqual(resultEntries[0], ["entry.888", "Budi"]);
+assert.deepStrictEqual(resultEntries[1], ["entry.999", "__other_option__"]);
+assert.deepStrictEqual(resultEntries[2], ["entry.999.other_option_response", "Malam Hari"]);
+
+console.log("All unit tests and Other-option checks passed!");
