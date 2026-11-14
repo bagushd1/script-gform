@@ -13,11 +13,11 @@
     .btn-main:disabled { background: #aaa; cursor: not-allowed; }
     .btn-action { width: auto; padding: 10px 14px; margin-top: 5px; background: #1a73e8; color: #fff; border: none; cursor: pointer; font-weight: 600; white-space: nowrap; }
     #status { margin-top: 15px; font-size: 14px; padding: 10px; background: #f0f4f9; border-radius: 4px; }
-    #fields-container { margin-top: 10px; padding: 12px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; }
+    #fields-container { margin-top: 12px; padding: 12px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; }
     .field-group { margin-bottom: 12px; }
     .field-group:last-child { margin-bottom: 0; }
     .field-group label { margin-top: 0; font-size: 13px; color: #222; }
-    details { margin-top: 15px; font-size: 13px; color: #555; }
+    details { margin-top: 12px; font-size: 13px; color: #444; }
     summary { cursor: pointer; font-weight: 600; color: #0b57d0; }
   </style>
 </head>
@@ -30,8 +30,17 @@
     <button type="button" class="btn-action" onclick="fetchFormFields()">Muat Form</button>
   </div>
 
+  <details style="margin-top: 8px;">
+    <summary>Tanpa Server / Offline: Ekstrak dari Page Source (Ctrl+U)</summary>
+    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 6px; border: 1px solid #e0e0e0;">
+      <p style="margin: 0 0 6px 0; font-size: 13px;">Buka Google Form di tab browser &gt; tekan <strong>Ctrl+U</strong> &gt; salin semua kodenya (<strong>Ctrl+A</strong>, <strong>Ctrl+C</strong>) &gt; lalu paste di bawah:</p>
+      <textarea id="source_input" rows="3" placeholder="Paste kode HTML source Google Form di sini..." style="font-size:12px;"></textarea>
+      <button type="button" class="btn-action" style="margin-top: 6px; width: 100%;" onclick="extractFromSource()">Generate Kolom Pertanyaan</button>
+    </div>
+  </details>
+
   <div id="fields-container" style="display:none;">
-    <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #0b57d0;">Isi Data Jawaban:</div>
+    <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #0b57d0;">Isi Jawaban Form:</div>
     <div id="dynamic-fields"></div>
   </div>
 
@@ -39,14 +48,6 @@
     <label for="entries">Data Entry Manual (Format: entry.ID=Nilai):</label>
     <textarea id="entries" rows="3" placeholder="entry.123456=Budi Santoso&#10;entry.987654=Senin"></textarea>
   </div>
-
-  <details>
-    <summary>Bantuan / Mode Manual</summary>
-    <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 6px; border: 1px solid #e0e0e0;">
-      <p style="margin: 0 0 6px 0;"><strong>Auto-Buka Form:</strong> Jalankan <code>node server.js</code> di terminal lalu buka <code>http://localhost:3000</code>. Cukup paste link Google Form dan klik tombol <strong>Muat Form</strong>.</p>
-      <p style="margin: 0 0 4px 0;"><strong>Pre-filled Link:</strong> Paste link hasil <em>Get pre-filled link</em> di kolom URL, kolom data entry otomatis terisi.</p>
-    </div>
-  </details>
 
   <label>Waktu Tembak (Jam : Menit : Detik):</label>
   <div class="row">
@@ -89,6 +90,48 @@
       }
     }
 
+    function parseSourceData(source) {
+      const match = source.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+      if (!match) return null;
+      try {
+        const data = JSON.parse(match[1]);
+        const formPath = data[14];
+        const questions = data[1][1] || [];
+        const fields = questions.map(q => {
+          const title = q[1];
+          const item = q[4] && q[4][0];
+          if (!item) return null;
+          const entryId = item[0];
+          const rawOptions = item[1];
+          const options = Array.isArray(rawOptions) ? rawOptions.map(o => o[0]) : null;
+          return {
+            id: `entry.${entryId}`,
+            title,
+            type: options ? "choice" : "text",
+            options
+          };
+        }).filter(Boolean);
+
+        return { formPath, fields };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function extractFromSource() {
+      const src = document.getElementById("source_input").value;
+      const parsed = parseSourceData(src);
+      if (parsed && parsed.fields.length > 0) {
+        if (!document.getElementById("url").value && parsed.formPath) {
+          document.getElementById("url").value = `https://docs.google.com/forms/d/${parsed.formPath}/viewform`;
+        }
+        renderDynamicFields(parsed.fields);
+        document.getElementById("status").innerText = `Berhasil membuat ${parsed.fields.length} pertanyaan dari source code!`;
+      } else {
+        alert("Gagal membaca source code Google Form. Pastikan source code di-copy lengkap dari Ctrl+U.");
+      }
+    }
+
     function handleUrlInput(val) {
       if (val.includes("entry.")) {
         const res = extractPrefilled(val);
@@ -117,11 +160,11 @@
         statusEl.innerText = `Berhasil memuat ${data.fields.length} pertanyaan! Silakan isi jawaban di bawah.`;
       } catch (err) {
         if (location.protocol === "file:") {
-          alert("Untuk auto-baca form, jalankan server via terminal:\n\nnode server.js\n\nLalu buka http://localhost:3000 di browser.");
+          alert("Mode file langsung tidak bisa fetch otomatis karena CORS. Gunakan menu 'Ekstrak dari Page Source (Ctrl+U)' di bawah, atau jalankan via server/Vercel.");
         } else {
           alert("Error: " + err.message);
         }
-        statusEl.innerText = "Gagal memuat form secara otomatis. Gunakan mode manual.";
+        statusEl.innerText = "Gagal memuat form secara otomatis. Gunakan mode manual/source.";
       }
     }
 
@@ -218,7 +261,7 @@
     }
 
     if (typeof module !== "undefined" && module.exports) {
-      module.exports = { normalizeUrl, parseEntries, extractPrefilled, getEntriesToSubmit };
+      module.exports = { normalizeUrl, parseEntries, extractPrefilled, parseSourceData, getEntriesToSubmit };
     }
   </script>
 </body>
