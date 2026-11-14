@@ -50,6 +50,9 @@
   <button id="btn" class="btn-main" onclick="startWar()">Pasang Timer</button>
   <div id="status">Status: Silakan paste source HTML form untuk mulai.</div>
 
+  <!-- Audio hening untuk mencegah browser HP menidurkan proses saat di-minimize -->
+  <audio id="keep_alive_audio" loop playsinline style="display:none;" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"></audio>
+
   <!-- shortcut: iframe ignores response body to avoid CORS, upgrade to backend proxy if HTTP code check is required -->
   <iframe name="hidden_frame" style="display:none;"></iframe>
   <form id="gform" method="POST" target="hidden_frame" style="display:none;"></form>
@@ -58,6 +61,16 @@
     let timer = null;
     let loadedFields = [];
     let wakeLock = null;
+
+    // Cegah tab tertutup secara tidak sengaja saat timer aktif
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", (e) => {
+        if (timer) {
+          e.preventDefault();
+          e.returnValue = "Timer sedang berjalan! Jika ditutup, form gagal terkirim.";
+        }
+      });
+    }
 
     async function requestWakeLock() {
       if ("wakeLock" in navigator) {
@@ -199,20 +212,31 @@
 
       const btn = document.getElementById("btn");
       const statusEl = document.getElementById("status");
+      const audioEl = document.getElementById("keep_alive_audio");
 
       btn.disabled = true;
       statusEl.className = "waiting";
       const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Menunggu pukul <strong>${targetTimeStr}</strong>...`;
 
+      // Minta izin wake lock agar layar tidak mati
       requestWakeLock();
+
+      // Putar audio hening agar OS Android/iOS tidak mematikan timer saat diminimize / pindah aplikasi
+      if (audioEl) {
+        audioEl.play().catch(() => {});
+      }
 
       timer = setInterval(() => {
         const now = new Date();
         if (now.getHours() === h && now.getMinutes() === m && now.getSeconds() >= s) {
           clearInterval(timer);
+          timer = null;
           form.submit();
           releaseWakeLock();
+          if (audioEl) {
+            audioEl.pause();
+          }
           statusEl.className = "sent";
           statusEl.innerHTML = `&#10004; <strong>Terkirim!</strong> Form telah otomatis di-submit ke server Google.`;
         }
