@@ -1,0 +1,9 @@
+{
+  "name": "war-gform",
+  "version": "1.0.0",
+  "description": "Auto submit Google Form on scheduled time",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  }
+}
