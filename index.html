@@ -61,6 +61,7 @@
     let timer = null;
     let loadedFields = [];
     let wakeLock = null;
+    let currentFormMeta = { pageHistory: "0", fbzx: null, fvv: "1" };
 
     // Cegah tab tertutup secara tidak sengaja saat timer aktif
     if (typeof window !== "undefined") {
@@ -97,26 +98,55 @@
         const data = JSON.parse(match[1]);
         const formPath = data[14];
         const questions = data[1][1] || [];
-        const fields = questions.map(q => {
-          const title = q[1];
-          const item = q[4] && q[4][0];
-          if (!item) return null;
-          const entryId = item[0];
-          const rawOptions = item[1];
-          const hasOther = Array.isArray(rawOptions) && (item[2] === 1 || rawOptions.some(o => o[4] === 1 || !o[0]));
-          const options = Array.isArray(rawOptions)
-            ? rawOptions.filter(o => o[0] && o[4] !== 1).map(o => o[0])
-            : null;
-          return {
-            id: `entry.${entryId}`,
-            title,
-            type: options ? "choice" : "text",
-            options,
-            hasOther
-          };
-        }).filter(Boolean);
 
-        return { formPath, fields };
+        const pageHistoryMatch = source.match(/name="pageHistory"\s+value="([^"]*)"/i) || source.match(/value="([^"]*)"\s+name="pageHistory"/i);
+        const fbzxMatch = source.match(/name="fbzx"\s+value="([^"]*)"/i) || source.match(/value="([^"]*)"\s+name="fbzx"/i);
+        const fvvMatch = source.match(/name="fvv"\s+value="([^"]*)"/i) || source.match(/value="([^"]*)"\s+name="fvv"/i);
+
+        const pageHistory = pageHistoryMatch ? pageHistoryMatch[1] : "0";
+        const fbzx = fbzxMatch ? fbzxMatch[1] : null;
+        const fvv = fvvMatch ? fvvMatch[1] : "1";
+
+        const fields = [];
+        questions.forEach(q => {
+          const mainTitle = q[1];
+          const qType = q[3];
+          const items = q[4] || [];
+          items.forEach((item) => {
+            if (!item) return;
+            const entryId = item[0];
+            const rawOptions = item[1];
+            const hasOther = Array.isArray(rawOptions) && (item[2] === 1 || rawOptions.some(o => o[4] === 1 || !o[0]));
+            const options = Array.isArray(rawOptions)
+              ? rawOptions.filter(o => o[0] && o[4] !== 1).map(o => o[0])
+              : null;
+
+            let type = "text";
+            if (qType === 4 || qType === 8) {
+              type = "checkbox";
+            } else if (qType === 9) {
+              type = "date";
+            } else if (qType === 10) {
+              type = "time";
+            } else if (qType === 13) {
+              type = "file";
+            } else if (options && options.length > 0) {
+              type = "choice";
+            }
+
+            const title = items.length > 1 && item[3] ? `${mainTitle} [${item[3]}]` : mainTitle;
+
+            fields.push({
+              id: `entry.${entryId}`,
+              title,
+              type,
+              options,
+              hasOther
+            });
+          });
+        });
+
+        return { formPath, fields, pageHistory, fbzx, fvv };
       } catch (e) {
         return null;
       }
@@ -131,6 +161,7 @@
         if (parsed.formPath) {
           document.getElementById("url").value = `https://docs.google.com/forms/d/${parsed.formPath}/viewform`;
         }
+        currentFormMeta = { pageHistory: parsed.pageHistory, fbzx: parsed.fbzx, fvv: parsed.fvv };
         renderDynamicFields(parsed.fields);
         statusEl.className = "";
         statusEl.innerText = `Berhasil mengekstrak ${parsed.fields.length} pertanyaan! Silakan isi jawaban di bawah.`;
@@ -181,6 +212,57 @@
             otherInput.style.marginTop = "6px";
             group.appendChild(otherInput);
           }
+        } else if (f.type === "checkbox" && Array.isArray(f.options)) {
+          const chkContainer = document.createElement("div");
+          chkContainer.style.display = "flex";
+          chkContainer.style.flexDirection = "column";
+          chkContainer.style.gap = "6px";
+          chkContainer.style.marginTop = "6px";
+          f.options.forEach(opt => {
+            const lbl = document.createElement("label");
+            lbl.style.fontWeight = "normal";
+            lbl.style.display = "flex";
+            lbl.style.alignItems = "center";
+            lbl.style.gap = "8px";
+            lbl.style.cursor = "pointer";
+            lbl.innerHTML = `<input type="checkbox" name="chk_${f.id}" value="${opt}" style="width:auto;margin:0;"> <span>${opt}</span>`;
+            chkContainer.appendChild(lbl);
+          });
+          if (f.hasOther) {
+            const lblOther = document.createElement("label");
+            lblOther.style.fontWeight = "normal";
+            lblOther.style.display = "flex";
+            lblOther.style.alignItems = "center";
+            lblOther.style.gap = "8px";
+            lblOther.style.cursor = "pointer";
+            lblOther.innerHTML = `<input type="checkbox" id="chk_other_toggle_${f.id}" value="__other__" style="width:auto;margin:0;" onchange="document.getElementById('other_${f.id}').style.display = this.checked ? 'block' : 'none'"> <span>Yang lain:</span>`;
+            chkContainer.appendChild(lblOther);
+
+            const otherInput = document.createElement("input");
+            otherInput.id = `other_${f.id}`;
+            otherInput.placeholder = `Ketik jawaban '${f.title}' (Yang lain) di sini...`;
+            otherInput.style.display = "none";
+            otherInput.style.marginTop = "4px";
+            chkContainer.appendChild(otherInput);
+          }
+          group.appendChild(chkContainer);
+        } else if (f.type === "date") {
+          const input = document.createElement("input");
+          input.type = "date";
+          input.id = `input_${f.id}`;
+          group.appendChild(input);
+        } else if (f.type === "time") {
+          const input = document.createElement("input");
+          input.type = "time";
+          input.id = `input_${f.id}`;
+          group.appendChild(input);
+        } else if (f.type === "file") {
+          const notice = document.createElement("div");
+          notice.style.fontSize = "12px";
+          notice.style.color = "#c5221f";
+          notice.style.marginTop = "4px";
+          notice.innerText = "⚠️ Soal upload file memerlukan sesi Google Drive & tidak bisa diotomasi via POST.";
+          group.appendChild(notice);
         } else {
           const input = document.createElement("input");
           input.id = `input_${f.id}`;
@@ -197,23 +279,56 @@
     function getEntriesToSubmit() {
       const entries = [];
       for (const f of loadedFields) {
-        const el = document.getElementById(`input_${f.id}`);
-        if (!el) continue;
-
-        if (el.tagName === "SELECT") {
-          const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
-          if (isOther) {
+        if (f.type === "checkbox") {
+          const checked = document.querySelectorAll(`input[name="chk_${f.id}"]:checked`);
+          checked.forEach(cb => entries.push([f.id, cb.value]));
+          const otherCb = document.getElementById(`chk_other_toggle_${f.id}`);
+          if (otherCb && otherCb.checked) {
             const otherEl = document.getElementById(`other_${f.id}`);
             const otherVal = otherEl ? otherEl.value.trim() : "";
             if (otherVal !== "") {
               entries.push([f.id, "__other_option__"]);
               entries.push([`${f.id}.other_option_response`, otherVal]);
             }
+          }
+        } else if (f.type === "date") {
+          const el = document.getElementById(`input_${f.id}`);
+          const val = el ? el.value.trim() : "";
+          if (val) {
+            const [y, m, d] = val.split("-");
+            entries.push([`${f.id}_year`, y]);
+            entries.push([`${f.id}_month`, String(parseInt(m, 10))]);
+            entries.push([`${f.id}_day`, String(parseInt(d, 10))]);
+            entries.push([f.id, val]);
+          }
+        } else if (f.type === "time") {
+          const el = document.getElementById(`input_${f.id}`);
+          const val = el ? el.value.trim() : "";
+          if (val) {
+            const [hh, mm] = val.split(":");
+            entries.push([`${f.id}_hour`, hh]);
+            entries.push([`${f.id}_minute`, mm]);
+            entries.push([f.id, val]);
+          }
+        } else {
+          const el = document.getElementById(`input_${f.id}`);
+          if (!el) continue;
+
+          if (el.tagName === "SELECT") {
+            const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
+            if (isOther) {
+              const otherEl = document.getElementById(`other_${f.id}`);
+              const otherVal = otherEl ? otherEl.value.trim() : "";
+              if (otherVal !== "") {
+                entries.push([f.id, "__other_option__"]);
+                entries.push([`${f.id}.other_option_response`, otherVal]);
+              }
+            } else if (el.value.trim() !== "") {
+              entries.push([f.id, el.value.trim()]);
+            }
           } else if (el.value.trim() !== "") {
             entries.push([f.id, el.value.trim()]);
           }
-        } else if (el.value.trim() !== "") {
-          entries.push([f.id, el.value.trim()]);
         }
       }
       return entries;
@@ -232,13 +347,23 @@
       }
 
       for (const f of loadedFields) {
-        const el = document.getElementById(`input_${f.id}`);
-        if (!el || el.tagName !== "SELECT") continue;
-        const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
-        if (isOther) {
-          const otherEl = document.getElementById(`other_${f.id}`);
-          if (!otherEl || !otherEl.value.trim()) {
-            return alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
+        if (f.type === "choice") {
+          const el = document.getElementById(`input_${f.id}`);
+          if (!el) continue;
+          const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
+          if (isOther) {
+            const otherEl = document.getElementById(`other_${f.id}`);
+            if (!otherEl || !otherEl.value.trim()) {
+              return alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
+            }
+          }
+        } else if (f.type === "checkbox") {
+          const otherCb = document.getElementById(`chk_other_toggle_${f.id}`);
+          if (otherCb && otherCb.checked) {
+            const otherEl = document.getElementById(`other_${f.id}`);
+            if (!otherEl || !otherEl.value.trim()) {
+              return alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
+            }
           }
         }
       }
@@ -255,6 +380,24 @@
       const form = document.getElementById("gform");
       form.action = targetUrl;
       form.innerHTML = "";
+      if (currentFormMeta.pageHistory) {
+        const inp = document.createElement("input");
+        inp.name = "pageHistory";
+        inp.value = currentFormMeta.pageHistory;
+        form.appendChild(inp);
+      }
+      if (currentFormMeta.fbzx) {
+        const inp = document.createElement("input");
+        inp.name = "fbzx";
+        inp.value = currentFormMeta.fbzx;
+        form.appendChild(inp);
+      }
+      if (currentFormMeta.fvv) {
+        const inp = document.createElement("input");
+        inp.name = "fvv";
+        inp.value = currentFormMeta.fvv;
+        form.appendChild(inp);
+      }
       entries.forEach(([k, v]) => {
         const input = document.createElement("input");
         input.name = k;
