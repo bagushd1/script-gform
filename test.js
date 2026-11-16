@@ -162,4 +162,19 @@ assert.deepStrictEqual(resultEntries[14], ["entry.444", "08:30"]);
 assert.deepStrictEqual(resultEntries[15], ["entry.331", "bagus"]);
 assert.deepStrictEqual(resultEntries[16], ["entry.332", "kurang"]);
 
-console.log("All unit tests and Other-option checks passed!");
+// Test native email collection detection
+const mockEmailSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[[1,"nama",null,0,[[888,null,0]]]]],null,null,null,null,null,null,null,null,null,null,null,null,"e/mockPath"];</script>
+<input type="email" autocomplete="email" aria-label="Email Anda">`;
+const parsedEmail = parseSourceData(mockEmailSource);
+assert.strictEqual(parsedEmail.fields.length, 2);
+assert.strictEqual(parsedEmail.fields[0].id, "emailAddress");
+assert.strictEqual(parsedEmail.fields[0].title, "Email");
+assert.strictEqual(parsedEmail.fields[0].type, "email");
+assert.strictEqual(parsedEmail.fields[1].id, "entry.888");
+
+const emailDom = { "emailAddress": "user@example.com", "entry.888": "Budi" };
+const emailEntries = mockGetEntries(parsedEmail.fields, emailDom);
+assert.deepStrictEqual(emailEntries[0], ["emailAddress", "user@example.com"]);
+assert.deepStrictEqual(emailEntries[1], ["entry.888", "Budi"]);
+
+console.log("All unit tests, Other-option checks, and Email-field checks passed!");

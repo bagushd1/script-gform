@@ -108,6 +108,20 @@
         const fvv = fvvMatch ? fvvMatch[1] : "1";
 
         const fields = [];
+
+        // Deteksi pengumpulan email wajib bawaan Google Form (Responder input)
+        const hasEmail = /<input[^>]+(?:type=["']?email["']?|autocomplete=["']?email["']?|name=["']?emailAddress["']?)/i.test(source) ||
+          Boolean(Array.isArray(data[1]) && Array.isArray(data[1][10]) && (data[1][10][6] === 3 || data[1][10][3] === 2));
+        if (hasEmail) {
+          fields.push({
+            id: "emailAddress",
+            title: "Email",
+            type: "email",
+            options: null,
+            hasOther: false
+          });
+        }
+
         questions.forEach(q => {
           const mainTitle = q[1];
           const qType = q[3];
@@ -265,6 +279,9 @@
           group.appendChild(notice);
         } else {
           const input = document.createElement("input");
+          if (f.type === "email") {
+            input.type = "email";
+          }
           input.id = `input_${f.id}`;
           input.placeholder = `Jawaban untuk ${f.title}`;
           group.appendChild(input);
