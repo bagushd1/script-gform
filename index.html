@@ -47,7 +47,11 @@
     <input id="s" type="number" value="0" min="0" max="59">
   </div>
 
-  <button id="btn" class="btn-main" onclick="startWar()">Pasang Timer</button>
+  <div class="row" style="margin-top: 16px;">
+    <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
+    <button id="btn_instant" class="btn-action" style="margin-top: 0; background: #0d652d;" onclick="instantSubmit()">Tembak Sekarang</button>
+    <button id="btn_cancel" class="btn-action" style="margin-top: 0; background: #c5221f; display: none;" onclick="cancelTimer()">Batal</button>
+  </div>
   <div id="status">Status: Silakan paste source HTML form untuk mulai.</div>
 
   <!-- Audio hening untuk mencegah browser HP menidurkan proses saat di-minimize -->
@@ -109,16 +113,15 @@
 
         const fields = [];
 
-        // Deteksi pengumpulan email wajib bawaan Google Form (Responder input)
-        const hasEmail = /<input[^>]+(?:type=["']?email["']?|autocomplete=["']?email["']?|name=["']?emailAddress["']?)/i.test(source) ||
-          Boolean(Array.isArray(data[1]) && Array.isArray(data[1][10]) && (data[1][10][6] === 3 || data[1][10][3] === 2));
-        if (hasEmail) {
+        // Deteksi native mandatory email collection jika Google Form memiliki input emailAddress
+        if (/name=["'\\]*emailAddress/i.test(source)) {
           fields.push({
             id: "emailAddress",
             title: "Email",
             type: "email",
             options: null,
-            hasOther: false
+            hasOther: false,
+            required: true
           });
         }
 
@@ -206,7 +209,13 @@
         label.innerText = `${idx + 1}. ${f.title}`;
         group.appendChild(label);
 
-        if (f.type === "choice" && Array.isArray(f.options)) {
+        if (f.type === "email" || f.id === "emailAddress") {
+          const input = document.createElement("input");
+          input.type = "email";
+          input.id = `input_${f.id}`;
+          input.placeholder = `Masukkan alamat email valid`;
+          group.appendChild(input);
+        } else if (f.type === "choice" && Array.isArray(f.options)) {
           const select = document.createElement("select");
           select.id = `input_${f.id}`;
           select.onchange = () => toggleOther(select, f.id);
@@ -279,9 +288,6 @@
           group.appendChild(notice);
         } else {
           const input = document.createElement("input");
-          if (f.type === "email") {
-            input.type = "email";
-          }
           input.id = `input_${f.id}`;
           input.placeholder = `Jawaban untuk ${f.title}`;
           group.appendChild(input);
@@ -351,6 +357,151 @@
       return entries;
     }
 
+    let rafId = null;
+    let submitted = false;
+
+    function preparePayload(targetUrl, entries) {
+      const form = document.getElementById("gform");
+      form.action = targetUrl;
+      form.innerHTML = "";
+
+      const searchParams = new URLSearchParams();
+      if (currentFormMeta.pageHistory) {
+        const inp = document.createElement("input");
+        inp.name = "pageHistory";
+        inp.value = currentFormMeta.pageHistory;
+        form.appendChild(inp);
+        searchParams.append("pageHistory", currentFormMeta.pageHistory);
+      }
+      if (currentFormMeta.fbzx) {
+        const inp = document.createElement("input");
+        inp.name = "fbzx";
+        inp.value = currentFormMeta.fbzx;
+        form.appendChild(inp);
+        searchParams.append("fbzx", currentFormMeta.fbzx);
+      }
+      if (currentFormMeta.fvv) {
+        const inp = document.createElement("input");
+        inp.name = "fvv";
+        inp.value = currentFormMeta.fvv;
+        form.appendChild(inp);
+        searchParams.append("fvv", currentFormMeta.fvv);
+      }
+      entries.forEach(([k, v]) => {
+        const input = document.createElement("input");
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+        searchParams.append(k, v);
+      });
+
+      return { form, searchParams };
+    }
+
+    function dispatchPayload(targetUrl, form, searchParams) {
+      // 1. Instant network level fetch POST (no DOM/iframe delay, direct socket write)
+      try {
+        fetch(targetUrl, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: searchParams.toString()
+        }).catch(() => {});
+      } catch (e) {}
+
+      // 2. Parallel submit to hidden iframe as fallback
+      try {
+        form.submit();
+      } catch (e) {}
+
+      // 3. sendBeacon fallback if supported
+      try {
+        if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+          navigator.sendBeacon(targetUrl, searchParams);
+        }
+      } catch (e) {}
+    }
+
+    function cancelTimer() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      releaseWakeLock();
+      const audioEl = document.getElementById("keep_alive_audio");
+      if (audioEl) audioEl.pause();
+
+      const btn = document.getElementById("btn");
+      if (btn) btn.disabled = false;
+      const cancelBtn = document.getElementById("btn_cancel");
+      if (cancelBtn) cancelBtn.style.display = "none";
+    }
+
+    function validateEntries() {
+      for (const f of loadedFields) {
+        if (f.id === "emailAddress") {
+          const el = document.getElementById(`input_${f.id}`);
+          if (!el || !el.value.trim()) {
+            alert("Kolom Email wajib diisi!");
+            return false;
+          }
+        } else if (f.type === "choice") {
+          const el = document.getElementById(`input_${f.id}`);
+          if (!el) continue;
+          const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
+          if (isOther) {
+            const otherEl = document.getElementById(`other_${f.id}`);
+            if (!otherEl || !otherEl.value.trim()) {
+              alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
+              return false;
+            }
+          }
+        } else if (f.type === "checkbox") {
+          const otherCb = document.getElementById(`chk_other_toggle_${f.id}`);
+          if (otherCb && otherCb.checked) {
+            const otherEl = document.getElementById(`other_${f.id}`);
+            if (!otherEl || !otherEl.value.trim()) {
+              alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
+              return false;
+            }
+          }
+        }
+      }
+      return true;
+    }
+
+    function instantSubmit() {
+      const rawUrl = document.getElementById("url").value;
+      const targetUrl = normalizeUrl(rawUrl);
+
+      if (loadedFields.length === 0) {
+        return alert("Silakan paste source HTML form dan klik 'Ekstrak Form' terlebih dahulu!");
+      }
+      if (!targetUrl.startsWith("http")) {
+        return alert("URL Google Form tidak valid!");
+      }
+
+      if (!validateEntries()) return;
+
+      const entries = getEntriesToSubmit();
+      if (entries.length === 0) {
+        return alert("Isi minimal satu kolom jawaban sebelum kirim!");
+      }
+
+      cancelTimer();
+      const { form, searchParams } = preparePayload(targetUrl, entries);
+      dispatchPayload(targetUrl, form, searchParams);
+
+      const statusEl = document.getElementById("status");
+      statusEl.className = "sent";
+      const nowStr = new Date().toTimeString().split(" ")[0];
+      statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form langsung ditembak pada pukul ${nowStr}.`;
+    }
+
     function startWar() {
       const rawUrl = document.getElementById("url").value;
       const targetUrl = normalizeUrl(rawUrl);
@@ -363,96 +514,96 @@
         return alert("URL Google Form tidak valid!");
       }
 
-      for (const f of loadedFields) {
-        if (f.type === "choice") {
-          const el = document.getElementById(`input_${f.id}`);
-          if (!el) continue;
-          const isOther = el.value === "__other__" || /^(?:lainnya|other|yang\s*lain)/i.test(el.value.trim());
-          if (isOther) {
-            const otherEl = document.getElementById(`other_${f.id}`);
-            if (!otherEl || !otherEl.value.trim()) {
-              return alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
-            }
-          }
-        } else if (f.type === "checkbox") {
-          const otherCb = document.getElementById(`chk_other_toggle_${f.id}`);
-          if (otherCb && otherCb.checked) {
-            const otherEl = document.getElementById(`other_${f.id}`);
-            if (!otherEl || !otherEl.value.trim()) {
-              return alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
-            }
-          }
-        }
-      }
+      if (!validateEntries()) return;
 
       const entries = getEntriesToSubmit();
       if (entries.length === 0) {
         return alert("Isi minimal satu kolom jawaban sebelum pasang timer!");
       }
 
+      cancelTimer();
+      submitted = false;
+
+      // Pre-warm TCP + TLS connection
+      try {
+        fetch(targetUrl, { method: "HEAD", mode: "no-cors" }).catch(() => {});
+      } catch (e) {}
+
+      // Pre-serialize payload agar saat tembak latency CPU 0ms
+      const { form, searchParams } = preparePayload(targetUrl, entries);
+
       const h = parseInt(document.getElementById("h").value, 10);
       const m = parseInt(document.getElementById("m").value, 10);
       const s = parseInt(document.getElementById("s").value, 10);
 
-      const form = document.getElementById("gform");
-      form.action = targetUrl;
-      form.innerHTML = "";
-      if (currentFormMeta.pageHistory) {
-        const inp = document.createElement("input");
-        inp.name = "pageHistory";
-        inp.value = currentFormMeta.pageHistory;
-        form.appendChild(inp);
+      const now = new Date();
+      let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
+      if (targetDate.getTime() <= now.getTime()) {
+        if (now.getTime() - targetDate.getTime() > 5000) {
+          targetDate.setDate(targetDate.getDate() + 1);
+        }
       }
-      if (currentFormMeta.fbzx) {
-        const inp = document.createElement("input");
-        inp.name = "fbzx";
-        inp.value = currentFormMeta.fbzx;
-        form.appendChild(inp);
-      }
-      if (currentFormMeta.fvv) {
-        const inp = document.createElement("input");
-        inp.name = "fvv";
-        inp.value = currentFormMeta.fvv;
-        form.appendChild(inp);
-      }
-      entries.forEach(([k, v]) => {
-        const input = document.createElement("input");
-        input.name = k;
-        input.value = v;
-        form.appendChild(input);
-      });
+      const targetMs = targetDate.getTime();
+      const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 
       const btn = document.getElementById("btn");
+      const cancelBtn = document.getElementById("btn_cancel");
       const statusEl = document.getElementById("status");
       const audioEl = document.getElementById("keep_alive_audio");
 
       btn.disabled = true;
+      if (cancelBtn) cancelBtn.style.display = "inline-block";
       statusEl.className = "waiting";
-      const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-      statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Menunggu pukul <strong>${targetTimeStr}</strong>...`;
 
-      // Minta izin wake lock agar layar tidak mati
       requestWakeLock();
+      if (audioEl) audioEl.play().catch(() => {});
 
-      // Putar audio hening agar OS Android/iOS tidak mematikan timer saat diminimize / pindah aplikasi
-      if (audioEl) {
-        audioEl.play().catch(() => {});
+      function executeSubmit() {
+        if (submitted) return;
+        submitted = true;
+        cancelTimer();
+        dispatchPayload(targetUrl, form, searchParams);
+        statusEl.className = "sent";
+        const sentTime = new Date().toTimeString().split(" ")[0];
+        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form otomatis ditembak pada pukul ${sentTime}.`;
       }
 
-      timer = setInterval(() => {
-        const now = new Date();
-        if (now.getHours() === h && now.getMinutes() === m && now.getSeconds() >= s) {
-          clearInterval(timer);
-          timer = null;
-          form.submit();
-          releaseWakeLock();
-          if (audioEl) {
-            audioEl.pause();
-          }
-          statusEl.className = "sent";
-          statusEl.innerHTML = `&#10004; <strong>Terkirim!</strong> Form telah otomatis di-submit ke server Google.`;
+      function tick() {
+        const remaining = targetMs - Date.now();
+        if (remaining <= 0) {
+          executeSubmit();
+          return;
         }
-      }, 50);
+
+        if (remaining > 1000) {
+          const remSec = Math.floor(remaining / 1000);
+          const remH = Math.floor(remSec / 3600);
+          const remM = Math.floor((remSec % 3600) / 60);
+          const remS = remSec % 60;
+          statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Target: <strong>${targetTimeStr}</strong> (Sisa: ${String(remH).padStart(2, '0')}:${String(remM).padStart(2, '0')}:${String(remS).padStart(2, '0')})`;
+        } else {
+          if (timer) { clearInterval(timer); timer = null; }
+          statusEl.innerHTML = `<span class="pulse-dot"></span>Bersiap tembak <strong>${targetTimeStr}</strong>... (${remaining}ms)`;
+
+          // Fallback timer jika frame tertunda
+          setTimeout(executeSubmit, Math.max(0, targetMs - Date.now()));
+
+          // Ultra-tight loop untuk presisi sub-milidetik tepat di detik target
+          function tightLoop() {
+            if (Date.now() >= targetMs) {
+              executeSubmit();
+            } else if (!submitted) {
+              rafId = requestAnimationFrame(tightLoop);
+            }
+          }
+          tightLoop();
+        }
+      }
+
+      tick();
+      if (!submitted && Date.now() < targetMs - 1000) {
+        timer = setInterval(tick, 100);
+      }
     }
 
     if (typeof module !== "undefined" && module.exports) {
