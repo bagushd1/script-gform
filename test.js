@@ -172,18 +172,19 @@ const mockUserFormWithoutEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["TESTING YAA BUA
 <input type="hidden" name="fvv" value="1">`;
 
 const parsedUserForm = parseSourceData(mockUserFormWithoutEmail);
-assert.strictEqual(parsedUserForm.fields.length, 4, "Must only have 4 fields, no false positive email!");
-assert.strictEqual(parsedUserForm.fields.some(f => f.id === "emailAddress"), false, "Must NOT contain emailAddress field!");
-assert.strictEqual(parsedUserForm.fields[0].title, "NAMA");
-assert.strictEqual(parsedUserForm.fields[1].title, "APAKAH ANDA PERLU INTROSPEKSI?");
-assert.strictEqual(parsedUserForm.fields[2].title, "senin");
-assert.strictEqual(parsedUserForm.fields[3].title, "selasa");
+// This mock has data[1][10][3] === 2, so the form DOES collect email
+assert.strictEqual(parsedUserForm.fields.length, 5, "Must have 5 fields: email + 4 questions");
+assert.strictEqual(parsedUserForm.fields[0].id, "emailAddress", "First field must be emailAddress");
+assert.strictEqual(parsedUserForm.fields[0].type, "email");
+assert.strictEqual(parsedUserForm.fields[1].title, "NAMA");
+assert.strictEqual(parsedUserForm.fields[2].title, "APAKAH ANDA PERLU INTROSPEKSI?");
+assert.strictEqual(parsedUserForm.fields[3].title, "senin");
+assert.strictEqual(parsedUserForm.fields[4].title, "selasa");
 
-// Test form WITH mandatory email collection (name="emailAddress")
+// Test form WITH mandatory email collection (data[1][10][3] === 2)
 const mockFormWithMandatoryEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Dengan Email",[
   [1,"Nama Lengkap",null,0,[[1111,null,0]]]
-]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
-<input type="email" name="emailAddress" class="whsOnd" required>
+],null,null,null,null,null,null,null,null,[null,null,null,2]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
 <input type="hidden" name="pageHistory" value="0">
 <input type="hidden" name="fbzx" value="999888">`;
 
@@ -208,12 +209,17 @@ assert.deepStrictEqual(emailEntries[0], ["emailAddress", "peserta@gmail.com"]);
 assert.deepStrictEqual(emailEntries[1], ["entry.1111", "Bagus"]);
 
 // Test with live Google Form if available
-if (fs.existsSync("/tmp/live_form.html")) {
-  const liveFormSource = fs.readFileSync("/tmp/live_form.html", "utf8");
+const liveFormPath = fs.existsSync(path.join(__dirname, "live_form.html"))
+  ? path.join(__dirname, "live_form.html")
+  : (fs.existsSync("/tmp/live_form.html") ? "/tmp/live_form.html" : null);
+
+if (liveFormPath) {
+  const liveFormSource = fs.readFileSync(liveFormPath, "utf8");
   const parsedLiveForm = parseSourceData(liveFormSource);
   assert(parsedLiveForm !== null, "Live form must parse successfully");
-  assert.strictEqual(parsedLiveForm.fields.length, 4, "Live form must have exactly 4 fields");
-  assert.strictEqual(parsedLiveForm.fields.some(f => f.id === "emailAddress"), false, "Live form must not have emailAddress");
+  assert.strictEqual(parsedLiveForm.fields.length, 6, "Live form must have exactly 6 fields (email + 5 questions)");
+  assert.strictEqual(parsedLiveForm.fields[0].id, "emailAddress", "Live form first field must be emailAddress");
+  assert.strictEqual(parsedLiveForm.fields[0].type, "email");
 }
 
 // Test mandatory multiple-choice field WITHOUT Other option (user's exact bug scenario)

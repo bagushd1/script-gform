@@ -107,12 +107,40 @@
     }
 
     function parseSourceData(source) {
-      const match = source.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
-      if (!match) return null;
+      // Bracket-counting extraction — O(n) tanpa regex backtracking pada HTML besar
+      const marker = source.indexOf('FB_PUBLIC_LOAD_DATA_');
+      let bracketStart = -1;
+      if (marker !== -1) {
+        bracketStart = source.indexOf('[', marker);
+      } else {
+        const trimmed = source.trim();
+        if (trimmed.startsWith('[')) bracketStart = source.indexOf('[');
+      }
+      if (bracketStart === -1) return null;
+
+      let depth = 0, inStr = false, esc = false, bracketEnd = -1;
+      for (let i = bracketStart; i < source.length; i++) {
+        const c = source[i];
+        if (esc) { esc = false; continue; }
+        if (c === '\\' && inStr) { esc = true; continue; }
+        if (c === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (c === '[') depth++;
+        else if (c === ']' && --depth === 0) { bracketEnd = i; break; }
+      }
+      if (bracketEnd === -1) return null;
+
       try {
-        const data = JSON.parse(match[1]);
-        const formPath = data[14];
-        const questions = data[1][1] || [];
+        const data = JSON.parse(source.substring(bracketStart, bracketEnd + 1));
+        let formPath = data[14];
+        if (!formPath) {
+          const formActionMatch = source.match(/<form[^>]+action="([^"]+)"/i);
+          if (formActionMatch) {
+            const pathMatch = formActionMatch[1].match(/\/forms\/(?:u\/\d+\/)?(?:d\/)?(e\/[^\/\s]+)/);
+            if (pathMatch) formPath = pathMatch[1];
+          }
+        }
+        const questions = (data[1] && data[1][1]) || [];
 
         const pageHistoryMatch = source.match(/name="pageHistory"\s+value="([^"]*)"/i) || source.match(/value="([^"]*)"\s+name="pageHistory"/i);
         const fbzxMatch = source.match(/name="fbzx"\s+value="([^"]*)"/i) || source.match(/value="([^"]*)"\s+name="fbzx"/i);
@@ -124,64 +152,46 @@
 
         const fields = [];
 
-        // Deteksi native mandatory email collection jika Google Form memiliki input emailAddress
-        if (/name=["'\\]*emailAddress/i.test(source)) {
-          fields.push({
-            id: "emailAddress",
-            title: "Email",
-            type: "email",
-            options: null,
-            hasOther: false,
-            required: true
-          });
+        // Email: data[1][10][3] === 2 atau <input type="email"> di HTML (payload key: emailAddress)
+        const settings = Array.isArray(data[1]) && Array.isArray(data[1][10]) ? data[1][10] : null;
+        const hasEmail = (settings && settings[3] === 2) || /<input[^>]+type=["']email["']/i.test(source);
+        if (hasEmail) {
+          fields.push({ id: "emailAddress", title: "Email", type: "email", options: null, hasOther: false, required: true });
         }
 
         questions.forEach(q => {
           const mainTitle = q[1];
           const qType = q[3];
           const items = q[4] || [];
-          items.forEach((item) => {
+          items.forEach(item => {
             if (!item) return;
             const entryId = item[0];
             const rawOptions = item[1];
-            const hasOther = Array.isArray(rawOptions) && rawOptions.some(o => o[4] === 1 || !o[0]);
+            // o[4] === 1 is the "Other / Lainnya" option marker
+            const hasOther = Array.isArray(rawOptions) && rawOptions.some(o => o[4] === 1);
             const options = Array.isArray(rawOptions)
               ? rawOptions.filter(o => o[0] && o[4] !== 1).map(o => o[0])
               : null;
 
             let type = "text";
-            if (qType === 4 || qType === 8) {
-              type = "checkbox";
-            } else if (qType === 9) {
-              type = "date";
-            } else if (qType === 10) {
-              type = "time";
-            } else if (qType === 13) {
-              type = "file";
-            } else if (options && options.length > 0) {
-              type = "choice";
-            }
+            if (qType === 4 || qType === 8) type = "checkbox";
+            else if (qType === 9) type = "date";
+            else if (qType === 10) type = "time";
+            else if (qType === 13) type = "file";
+            else if (options && options.length > 0) type = "choice";
 
             const title = items.length > 1 && item[3] ? `${mainTitle} [${item[3]}]` : mainTitle;
-
-            fields.push({
-              id: `entry.${entryId}`,
-              title,
-              type,
-              options,
-              hasOther,
-              required: item[2] === 1
-            });
+            fields.push({ id: `entry.${entryId}`, title, type, options, hasOther, required: item[2] === 1 });
           });
         });
 
-        // Jika form mengaktifkan acak urutan pertanyaan, sesuaikan urutan fields dengan tampilan layar responden (DOM)
+        // Sort by DOM order for shuffled forms
         const domMatches = [...source.matchAll(/data-params="([^"]+)"/g)];
         if (domMatches.length > 0) {
           const domOrder = new Map();
           domMatches.forEach((m, idx) => {
-            const entryMatch = m[1].match(/\[\[(\d+)/);
-            if (entryMatch) domOrder.set(`entry.${entryMatch[1]}`, idx);
+            const entryMatches = [...m[1].matchAll(/\[\[(\d+)/g)];
+            entryMatches.forEach(em => domOrder.set(`entry.${em[1]}`, idx));
           });
           fields.sort((a, b) => {
             const posA = a.id === "emailAddress" ? -1 : (domOrder.has(a.id) ? domOrder.get(a.id) : 999);
@@ -197,9 +207,18 @@
     }
 
     function extractFromSource() {
-      const src = document.getElementById("source_input").value;
-      const parsed = parseSourceData(src);
+      const srcInput = document.getElementById("source_input");
+      const src = srcInput ? srcInput.value.trim() : "";
       const statusEl = document.getElementById("status");
+
+      if (!src) {
+        return alert("Silakan paste kode HTML source Google Form terlebih dahulu!");
+      }
+      if (src.startsWith("http://") || src.startsWith("https://") || (src.includes("docs.google.com/forms") && !src.includes("<"))) {
+        return alert("Perhatian: Yang Anda paste adalah LINK URL form, bukan source code HTML!\n\nCara mengambil Source Code:\n1. Buka link Google Form di tab baru\n2. Tekan Ctrl + U (atau di browser HP ketik 'view-source:' di depan link)\n3. Tekan Ctrl + A (Select All) lalu Ctrl + C (Copy)\n4. Paste semua kode HTML ke kotak ini, lalu klik 'Ekstrak Form'.");
+      }
+
+      const parsed = parseSourceData(src);
 
       if (parsed && parsed.fields.length > 0) {
         if (parsed.formPath) {
@@ -210,7 +229,7 @@
         statusEl.className = "";
         statusEl.innerText = `Berhasil mengekstrak ${parsed.fields.length} pertanyaan! Silakan isi jawaban di bawah.`;
       } else {
-        alert("Gagal membaca source code Google Form. Pastikan kode yang di-paste lengkap.");
+        alert("Gagal membaca source code Google Form. Pastikan kode HTML yang di-paste lengkap dari awal sampai akhir.");
       }
     }
 
