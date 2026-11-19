@@ -27,8 +27,9 @@
 <body>
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
     <h2 style="margin: 0;">War GForm Timer</h2>
-    <div style="font-size: 13px; font-weight: 600; color: #333; background: #e8f0fe; padding: 4px 10px; border-radius: 4px; border: 1px solid #c2e7ff;">
-      Jam Sekarang: <span id="clock" style="font-family: monospace; color: #0b57d0; font-size: 14px;">--:--:--</span>
+    <div style="font-size: 13px; font-weight: 600; color: #333; background: #e8f0fe; padding: 4px 10px; border-radius: 4px; border: 1px solid #c2e7ff; display: flex; align-items: center; gap: 4px;">
+      Jam: <span id="clock" style="font-family: monospace; color: #0b57d0; font-size: 14px;">--:--:--</span>
+      <span id="sync_badge" style="font-size: 10px; color: #137333; background: #e6f4ea; padding: 1px 4px; border-radius: 3px;">Sync...</span>
     </div>
   </div>
 
@@ -52,6 +53,11 @@
     <input id="s" type="number" value="0" min="0" max="59" title="Detik">
   </div>
 
+  <label style="font-weight: normal; font-size: 13px; display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer;">
+    <input type="checkbox" id="burst_mode" checked style="width: auto; margin: 0;">
+    <span><strong>Burst Fire Mode</strong> (Tembak 3x cepat: 0ms, +150ms, +350ms anti-packet drop)</span>
+  </label>
+
   <div class="row" style="margin-top: 16px;">
     <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
     <button id="btn_cancel" class="btn-action" style="margin-top: 0; background: #c5221f; display: none;" onclick="cancelTimer()">Batal</button>
@@ -67,25 +73,129 @@
 
   <script>
     let timer = null;
+    let timerWorker = null;
     let loadedFields = [];
     let wakeLock = null;
     let currentFormMeta = { pageHistory: "0", fbzx: null, fvv: "1" };
+    let serverTimeOffset = 0;
+
+    function getNow() {
+      return Date.now() + serverTimeOffset;
+    }
+
+    async function syncServerTime() {
+      try {
+        const t0 = performance.now();
+        const res = await fetch("https://api.github.com", { method: "HEAD" });
+        const t1 = performance.now();
+        const dateHeader = res.headers.get("date");
+        if (dateHeader) {
+          const serverMs = new Date(dateHeader).getTime() + Math.round((t1 - t0) / 2);
+          serverTimeOffset = serverMs - Date.now();
+          const badge = document.getElementById("sync_badge");
+          if (badge) {
+            const sign = serverTimeOffset >= 0 ? "+" : "";
+            badge.innerText = `Sync (${sign}${serverTimeOffset}ms)`;
+          }
+        }
+      } catch (e) {
+        const badge = document.getElementById("sync_badge");
+        if (badge) badge.innerText = "Lokal";
+      }
+    }
+
+    function initTimerWorker(tickFn) {
+      if (typeof Worker !== "undefined" && !timerWorker) {
+        try {
+          const blob = new Blob([
+            "let tid = null;\n" +
+            "self.onmessage = function(e) {\n" +
+            "  if (e.data === 'start') {\n" +
+            "    if (tid) clearInterval(tid);\n" +
+            "    tid = setInterval(function() { self.postMessage('tick'); }, 20);\n" +
+            "  } else if (e.data === 'stop') {\n" +
+            "    if (tid) { clearInterval(tid); tid = null; }\n" +
+            "  }\n" +
+            "};"
+          ], { type: "application/javascript" });
+          timerWorker = new Worker(URL.createObjectURL(blob));
+          timerWorker.onmessage = function(e) {
+            if (e.data === 'tick' && typeof tickFn === 'function') tickFn();
+          };
+        } catch (e) {}
+      }
+    }
 
     function updateClock() {
       const el = document.getElementById("clock");
-      if (el) el.innerText = new Date().toTimeString().split(" ")[0];
+      if (el) el.innerText = new Date(getNow()).toTimeString().split(" ")[0];
     }
 
     // Cegah tab tertutup secara tidak sengaja saat timer aktif & jalankan jam real-time
     if (typeof window !== "undefined") {
       updateClock();
       setInterval(updateClock, 1000);
+      syncServerTime();
+      setInterval(syncServerTime, 60000);
+
       window.addEventListener("beforeunload", (e) => {
         if (timer) {
           e.preventDefault();
           e.returnValue = "Timer sedang berjalan! Jika ditutup, form gagal terkirim.";
         }
       });
+
+      // Restore saved HTML and answers on load
+      window.addEventListener("DOMContentLoaded", () => {
+        restoreSavedState();
+      });
+    }
+
+    function saveState() {
+      try {
+        if (typeof localStorage === "undefined") return;
+        const src = document.getElementById("source_input").value;
+        if (src) localStorage.setItem("war_gform_html", src);
+        const answers = {};
+        for (const f of loadedFields) {
+          if (f.type === "checkbox") {
+            const checked = [...document.querySelectorAll(`input[name="chk_${f.id}"]:checked`)].map(c => c.value);
+            answers[`chk_${f.id}`] = checked;
+          } else {
+            const el = document.getElementById(`input_${f.id}`);
+            if (el) answers[f.id] = el.value;
+          }
+          const otherEl = document.getElementById(`other_${f.id}`);
+          if (otherEl) answers[`other_${f.id}`] = otherEl.value;
+        }
+        localStorage.setItem("war_gform_answers", JSON.stringify(answers));
+      } catch (e) {}
+    }
+
+    function restoreSavedState() {
+      try {
+        if (typeof localStorage === "undefined") return;
+        const savedHtml = localStorage.getItem("war_gform_html");
+        if (savedHtml && !document.getElementById("source_input").value) {
+          document.getElementById("source_input").value = savedHtml;
+          extractFromSource(true);
+          const savedAnswers = JSON.parse(localStorage.getItem("war_gform_answers") || "{}");
+          for (const [k, v] of Object.entries(savedAnswers)) {
+            if (Array.isArray(v)) {
+              v.forEach(val => {
+                const cb = document.querySelector(`input[name="${k}"][value="${val}"]`);
+                if (cb) cb.checked = true;
+              });
+            } else {
+              const el = document.getElementById(`input_${k}`) || document.getElementById(k);
+              if (el) {
+                el.value = v;
+                if (el.tagName === "SELECT") toggleOther(el, k);
+              }
+            }
+          }
+        }
+      } catch (e) {}
     }
 
     async function requestWakeLock() {
@@ -206,16 +316,18 @@
       }
     }
 
-    function extractFromSource() {
+    function extractFromSource(silent) {
       const srcInput = document.getElementById("source_input");
       const src = srcInput ? srcInput.value.trim() : "";
       const statusEl = document.getElementById("status");
 
       if (!src) {
-        return alert("Silakan paste kode HTML source Google Form terlebih dahulu!");
+        if (!silent) alert("Silakan paste kode HTML source Google Form terlebih dahulu!");
+        return;
       }
       if (src.startsWith("http://") || src.startsWith("https://") || (src.includes("docs.google.com/forms") && !src.includes("<"))) {
-        return alert("Perhatian: Yang Anda paste adalah LINK URL form, bukan source code HTML!\n\nCara mengambil Source Code:\n1. Buka link Google Form di tab baru\n2. Tekan Ctrl + U (atau di browser HP ketik 'view-source:' di depan link)\n3. Tekan Ctrl + A (Select All) lalu Ctrl + C (Copy)\n4. Paste semua kode HTML ke kotak ini, lalu klik 'Ekstrak Form'.");
+        if (!silent) alert("Perhatian: Yang Anda paste adalah LINK URL form, bukan source code HTML!\n\nCara mengambil Source Code:\n1. Buka link Google Form di tab baru\n2. Tekan Ctrl + U (atau di browser HP ketik 'view-source:' di depan link)\n3. Tekan Ctrl + A (Select All) lalu Ctrl + C (Copy)\n4. Paste semua kode HTML ke kotak ini, lalu klik 'Ekstrak Form'.");
+        return;
       }
 
       const parsed = parseSourceData(src);
@@ -228,8 +340,9 @@
         renderDynamicFields(parsed.fields);
         statusEl.className = "";
         statusEl.innerText = `Berhasil mengekstrak ${parsed.fields.length} pertanyaan! Silakan isi jawaban di bawah.`;
+        saveState();
       } else {
-        alert("Gagal membaca source code Google Form. Pastikan kode HTML yang di-paste lengkap dari awal sampai akhir.");
+        if (!silent) alert("Gagal membaca source code Google Form. Pastikan kode HTML yang di-paste lengkap dari awal sampai akhir.");
       }
     }
 
@@ -342,6 +455,8 @@
         listEl.appendChild(group);
       });
 
+      container.oninput = saveState;
+      container.onchange = saveState;
       container.style.display = "block";
     }
 
@@ -473,6 +588,9 @@
         clearInterval(timer);
         timer = null;
       }
+      if (timerWorker) {
+        timerWorker.postMessage('stop');
+      }
       if (rafId) {
         cancelAnimationFrame(rafId);
         rafId = null;
@@ -571,7 +689,7 @@
       // shortcut: offset 0ms agar mendarat tepat >= detik target (mencegah diskualifikasi sebelum detik 00)
       const offset = 0;
 
-      const now = new Date();
+      const now = new Date(getNow());
       let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
       if (targetDate.getTime() <= now.getTime()) {
         if (now.getTime() - targetDate.getTime() > 5000) {
@@ -602,15 +720,25 @@
         if (submitted) return;
         submitted = true;
         cancelTimer();
+
+        // 1. Primary immediate shot
         dispatchPayload(targetUrl, form, searchParams);
+
+        // 2. Burst Fire Mode (3x shots: 0ms, +150ms, +350ms)
+        const burstMode = document.getElementById("burst_mode") ? document.getElementById("burst_mode").checked : true;
+        if (burstMode) {
+          setTimeout(() => dispatchPayload(targetUrl, form, searchParams), 150);
+          setTimeout(() => dispatchPayload(targetUrl, form, searchParams), 350);
+        }
+
         statusEl.className = "sent";
-        const d = new Date();
+        const d = new Date(getNow());
         const sentTime = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}).`;
+        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang${burstMode ? ' (Burst 3x)' : ''}!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}).`;
       }
 
       function tick() {
-        const remainingToFire = fireMs - Date.now();
+        const remainingToFire = fireMs - getNow();
         if (remainingToFire <= 0) {
           executeSubmit();
           return;
@@ -643,7 +771,7 @@
             setTimeout(executeSubmit, Math.max(0, remainingToFire));
 
             function tightLoop() {
-              if (Date.now() >= fireMs) {
+              if (getNow() >= fireMs) {
                 executeSubmit();
               } else if (!submitted) {
                 rafId = requestAnimationFrame(tightLoop);
@@ -655,8 +783,10 @@
       }
 
       tick();
-      if (!submitted && Date.now() < fireMs) {
+      if (!submitted && getNow() < fireMs) {
         timer = setInterval(tick, 50);
+        initTimerWorker(tick);
+        if (timerWorker) timerWorker.postMessage('start');
       }
     }
 
