@@ -172,19 +172,19 @@ const mockUserFormWithoutEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["TESTING YAA BUA
 <input type="hidden" name="fvv" value="1">`;
 
 const parsedUserForm = parseSourceData(mockUserFormWithoutEmail);
-// This mock has data[1][10][3] === 2, so the form DOES collect email
-assert.strictEqual(parsedUserForm.fields.length, 5, "Must have 5 fields: email + 4 questions");
-assert.strictEqual(parsedUserForm.fields[0].id, "emailAddress", "First field must be emailAddress");
-assert.strictEqual(parsedUserForm.fields[0].type, "email");
-assert.strictEqual(parsedUserForm.fields[1].title, "NAMA");
-assert.strictEqual(parsedUserForm.fields[2].title, "APAKAH ANDA PERLU INTROSPEKSI?");
-assert.strictEqual(parsedUserForm.fields[3].title, "senin");
-assert.strictEqual(parsedUserForm.fields[4].title, "selasa");
+// This form has 'Tidak dibagikan' and no email input, so it must NOT have emailAddress
+assert.strictEqual(parsedUserForm.fields.length, 4, "Must have exactly 4 fields, no email");
+assert.strictEqual(parsedUserForm.fields.some(f => f.id === "emailAddress"), false, "Must NOT contain emailAddress");
+assert.strictEqual(parsedUserForm.fields[0].title, "NAMA");
+assert.strictEqual(parsedUserForm.fields[1].title, "APAKAH ANDA PERLU INTROSPEKSI?");
+assert.strictEqual(parsedUserForm.fields[2].title, "senin");
+assert.strictEqual(parsedUserForm.fields[3].title, "selasa");
 
-// Test form WITH mandatory email collection (data[1][10][3] === 2)
+// Test form WITH mandatory email collection (autocomplete="email" or settings[6] === 3)
 const mockFormWithMandatoryEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Dengan Email",[
   [1,"Nama Lengkap",null,0,[[1111,null,0]]]
-],null,null,null,null,null,null,null,null,[null,null,null,2]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+],null,null,null,null,null,null,null,null,[null,null,null,2,null,null,3]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+<input type="email" autocomplete="email" required>
 <input type="hidden" name="pageHistory" value="0">
 <input type="hidden" name="fbzx" value="999888">`;
 
@@ -246,6 +246,20 @@ assert.strictEqual(parsedDrgYunita.fields[5].id, "entry.1621898980");
 assert.strictEqual(parsedDrgYunita.pageHistory, "0");
 assert.strictEqual(parsedDrgYunita.fbzx, "-4115118172904650298");
 assert.strictEqual(parsedDrgYunita.fvv, "1");
+
+// Test user form 'PERCOBAAN' (explicitly NO email collection, contains 'Tidak dibagikan')
+const mockPercobaanForm = `<!DOCTYPE html><html lang="id"><head><title>PERCOBAAN</title></head><body>
+<span class="EbMsme">849035bagus.bhs@gmail.com</span>
+<div class="Q99PAd">Tidak dibagikan</div>
+<input type="hidden" name="fvv" value="1">
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="-5896808217690937300">
+<script>var FB_PUBLIC_LOAD_DATA_ = [null,[null,[[1741982360,"selasa",null,2,[[1134934596,[["pagi",null,null,null,0],["siang",null,null,null,0]],0]]],[711003955,"nama",null,0,[[1384785889,null,0]]],[457102014,"senin",null,2,[[1438390383,[["pagi",null,null,null,0],["siang",null,null,null,0]],0]]],[790920804,"tindakan",null,2,[[1098825655,[["indikasi",null,null,null,0],["kontrol",null,null,null,0],["",null,null,null,1]],1]]]],null,null,null,null,null,null,"PERCOBAAN",76,[null,null,null,2,null,null,1]],"/forms","Formulir tanpa judul",null,null,null,"0",null,0,0,null,"",0,"e/1FAIpQLSdvgKAasdxYZD9BFFxS6w52njno3UUEyXMjiaVIhOGrS0P25g"];</script>
+</body></html>`;
+const parsedPercobaan = parseSourceData(mockPercobaanForm);
+assert(parsedPercobaan !== null, "Percobaan must parse");
+assert.strictEqual(parsedPercobaan.fields.length, 4, "Must have exactly 4 questions");
+assert.strictEqual(parsedPercobaan.fields.some(f => f.id === "emailAddress"), false, "Must strictly NOT have emailAddress");
 
 // Test resilience against corrupted inputs
 assert.strictEqual(parseSourceData(""), null);
@@ -314,7 +328,8 @@ assert.deepStrictEqual(noEmailPayloadEntries, [["entry.1001", "Budi"], ["entry.2
 // Case B: Form WITH email collection
 const mockStrictWithEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Ada Email",[
   [100,"Nama Lengkap",null,0,[[1001,null,1]]]
-],null,null,null,null,null,null,null,null,[null,null,1,2]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+],null,null,null,null,null,null,null,null,[null,null,1,2,null,null,3]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+<input type="email" class="whsOnd zHQkBf" autocomplete="email" required>
 <input type="hidden" name="pageHistory" value="0">
 <input type="hidden" name="fbzx" value="12345">
 <input type="hidden" name="fvv" value="1">`;

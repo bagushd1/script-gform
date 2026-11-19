@@ -152,9 +152,9 @@
 
         const fields = [];
 
-        // Email: data[1][10][3] === 2 atau <input type="email"> di HTML (payload key: emailAddress)
+        // Email: form mengumpulkan email jika ada input email di HTML atau settings[6] === 3
         const settings = Array.isArray(data[1]) && Array.isArray(data[1][10]) ? data[1][10] : null;
-        const hasEmail = (settings && settings[3] === 2) || /<input[^>]+type=["']email["']/i.test(source);
+        const hasEmail = /<input[^>]+(?:type=["']email["']|autocomplete=["']email["']|name=["']emailAddress["'])/i.test(source) || (settings && settings[6] === 3);
         if (hasEmail) {
           fields.push({ id: "emailAddress", title: "Email", type: "email", options: null, hasOther: false, required: true });
         }
