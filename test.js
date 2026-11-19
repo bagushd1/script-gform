@@ -349,4 +349,25 @@ for (let i = 0; i < 100; i++) {
   assert.strictEqual(p2.fields.length, 2);
 }
 
-console.log("All unit tests, Other-option checks, Email-field checks, Dynamic Email checks, and Shuffled-DOM checks passed!");
+// Single Shot Dispatch Test
+let fetchCallCount = 0;
+let formSubmitCount = 0;
+const mockFetch = (url, opts) => {
+  fetchCallCount++;
+  return Promise.resolve();
+};
+const mockForm = {
+  submit: () => { formSubmitCount++; }
+};
+
+const { dispatchPayload } = eval(`(function() {
+  const fetch = mockFetch;
+  ${script}
+  return { dispatchPayload };
+})()`);
+
+dispatchPayload("https://example.com/formResponse", mockForm, new URLSearchParams({ a: "1" }));
+assert.strictEqual(fetchCallCount, 1, "Must call fetch exactly once (Single Shot)");
+assert.strictEqual(formSubmitCount, 0, "Form submit fallback must NOT be called when fetch succeeds");
+
+console.log("All unit tests, Other-option checks, Email-field checks, Dynamic Email checks, Shuffled-DOM checks, and Single Shot checks passed!");

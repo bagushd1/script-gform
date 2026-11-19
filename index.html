@@ -53,10 +53,10 @@
     <input id="s" type="number" value="0" min="0" max="59" title="Detik">
   </div>
 
-  <label style="font-weight: normal; font-size: 13px; display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer;">
-    <input type="checkbox" id="burst_mode" checked style="width: auto; margin: 0;">
-    <span><strong>Burst Fire Mode</strong> (Tembak 3x cepat: 0ms, +150ms, +350ms anti-packet drop)</span>
-  </label>
+  <div style="font-size: 12px; color: #137333; margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+    <span>&#128274;</span>
+    <span><strong>Single Shot Mode</strong> (Tembak tepat 1x saat detik target tiba, dilarang tembak mendahului)</span>
+  </div>
 
   <div class="row" style="margin-top: 16px;">
     <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
@@ -560,27 +560,26 @@
     }
 
     function dispatchPayload(targetUrl, form, searchParams) {
-      // 1. Instant network level fetch POST (no DOM/iframe delay, direct socket write)
+      // Single Shot: tembak tepat 1x ke server Google
+      let sent = false;
       try {
-        fetch(targetUrl, {
-          method: "POST",
-          mode: "no-cors",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: searchParams.toString()
-        }).catch(() => {});
-      } catch (e) {}
-
-      // 2. Parallel submit to hidden iframe as fallback
-      try {
-        form.submit();
-      } catch (e) {}
-
-      // 3. sendBeacon fallback if supported
-      try {
-        if (typeof navigator !== "undefined" && navigator.sendBeacon) {
-          navigator.sendBeacon(targetUrl, searchParams);
+        if (typeof fetch === "function") {
+          fetch(targetUrl, {
+            method: "POST",
+            mode: "no-cors",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: searchParams.toString()
+          }).catch(() => {});
+          sent = true;
         }
       } catch (e) {}
+
+      // Fallback ke form.submit hanya jika fetch tidak tersedia / gagal
+      if (!sent) {
+        try {
+          form.submit();
+        } catch (e) {}
+      }
     }
 
     function cancelTimer() {
@@ -686,8 +685,6 @@
       const h = parseInt(document.getElementById("h").value, 10);
       const m = parseInt(document.getElementById("m").value, 10);
       const s = parseInt(document.getElementById("s").value, 10);
-      // shortcut: offset 0ms agar mendarat tepat >= detik target (mencegah diskualifikasi sebelum detik 00)
-      const offset = 0;
 
       const now = new Date(getNow());
       let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
@@ -697,7 +694,6 @@
         }
       }
       const targetMs = targetDate.getTime();
-      const fireMs = targetMs - offset;
       const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 
       const btn = document.getElementById("btn");
@@ -717,61 +713,57 @@
       let tightIntervalStarted = false;
 
       function executeSubmit() {
+        const currentNow = getNow();
+        // VALIDASI KETAT: Dilarang keras tembak sebelum detik target tiba (anti-diskualifikasi)
+        if (currentNow < targetMs) return;
         if (submitted) return;
         submitted = true;
         cancelTimer();
 
-        // 1. Primary immediate shot
+        // Single Shot (Tembak tepat 1x)
         dispatchPayload(targetUrl, form, searchParams);
 
-        // 2. Burst Fire Mode (3x shots: 0ms, +150ms, +350ms)
-        const burstMode = document.getElementById("burst_mode") ? document.getElementById("burst_mode").checked : true;
-        if (burstMode) {
-          setTimeout(() => dispatchPayload(targetUrl, form, searchParams), 150);
-          setTimeout(() => dispatchPayload(targetUrl, form, searchParams), 350);
-        }
-
         statusEl.className = "sent";
-        const d = new Date(getNow());
+        const d = new Date(currentNow);
         const sentTime = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang${burstMode ? ' (Burst 3x)' : ''}!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}).`;
+        statusEl.innerHTML = `&#10004; <strong>Terkirim tepat waktu (1x tembak)!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}).`;
       }
 
       function tick() {
-        const remainingToFire = fireMs - getNow();
-        if (remainingToFire <= 0) {
+        const currentNow = getNow();
+        const remaining = targetMs - currentNow;
+        if (remaining <= 0) {
           executeSubmit();
           return;
         }
 
         // Pre-warm TCP+TLS saat mendekati waktu tembak agar socket siap tanpa delay
-        if (remainingToFire <= 3000 && !prewarmed3s) {
+        if (remaining <= 3000 && !prewarmed3s) {
           prewarmed3s = true;
           try { fetch(targetUrl, { method: "HEAD", mode: "no-cors" }).catch(() => {}); } catch (e) {}
         }
-        if (remainingToFire <= 1000 && !prewarmed1s) {
+        if (remaining <= 1000 && !prewarmed1s) {
           prewarmed1s = true;
           try { fetch(targetUrl, { method: "HEAD", mode: "no-cors" }).catch(() => {}); } catch (e) {}
         }
 
-        if (remainingToFire > 1500) {
-          const remSec = Math.floor(remainingToFire / 1000);
+        if (remaining > 1500) {
+          const remSec = Math.floor(remaining / 1000);
           const remH = Math.floor(remSec / 3600);
           const remM = Math.floor((remSec % 3600) / 60);
           const remS = remSec % 60;
           statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Target: <strong>${targetTimeStr}</strong> (Sisa: ${String(remH).padStart(2, '0')}:${String(remM).padStart(2, '0')}:${String(remS).padStart(2, '0')})`;
         } else {
-          statusEl.innerHTML = `<span class="pulse-dot"></span>Bersiap tembak <strong>${targetTimeStr}</strong>... (${remainingToFire}ms)`;
+          statusEl.innerHTML = `<span class="pulse-dot"></span>Bersiap tembak <strong>${targetTimeStr}</strong>... (${remaining}ms)`;
 
-          // Masuk fase kritis (< 1.5 detik): tingkatkan frekuensi interval agar tahan throttle background
+          // Masuk fase kritis (< 1.5 detik): aktifkan loop presisi tinggi tanpa mendahului detik target
           if (!tightIntervalStarted) {
             tightIntervalStarted = true;
             if (timer) clearInterval(timer);
             timer = setInterval(tick, 10);
-            setTimeout(executeSubmit, Math.max(0, remainingToFire));
 
             function tightLoop() {
-              if (getNow() >= fireMs) {
+              if (getNow() >= targetMs) {
                 executeSubmit();
               } else if (!submitted) {
                 rafId = requestAnimationFrame(tightLoop);
@@ -783,7 +775,7 @@
       }
 
       tick();
-      if (!submitted && getNow() < fireMs) {
+      if (!submitted && getNow() < targetMs) {
         timer = setInterval(tick, 50);
         initTimerWorker(tick);
         if (timerWorker) timerWorker.postMessage('start');
