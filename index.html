@@ -25,7 +25,12 @@
   </style>
 </head>
 <body>
-  <h2 style="margin-top:0;">War GForm Timer</h2>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <h2 style="margin: 0;">War GForm Timer</h2>
+    <div style="font-size: 13px; font-weight: 600; color: #333; background: #e8f0fe; padding: 4px 10px; border-radius: 4px; border: 1px solid #c2e7ff;">
+      Jam Sekarang: <span id="clock" style="font-family: monospace; color: #0b57d0; font-size: 14px;">--:--:--</span>
+    </div>
+  </div>
 
   <label for="source_input">1. Paste Source HTML Google Form (Ctrl+U):</label>
   <div class="hint">Buka form &gt; tekan Ctrl+U (atau ketik <code>view-source:</code> di HP) &gt; salin semua &gt; paste di bawah:</div>
@@ -40,18 +45,15 @@
     <div id="dynamic-fields"></div>
   </div>
 
-  <label>3. Waktu Tembak (Jam : Menit : Detik : Offset ms):</label>
+  <label>3. Waktu Tembak (Jam : Menit : Detik):</label>
   <div class="row">
     <input id="h" type="number" value="7" min="0" max="23" title="Jam">
     <input id="m" type="number" value="0" min="0" max="59" title="Menit">
     <input id="s" type="number" value="0" min="0" max="59" title="Detik">
-    <input id="offset" type="number" value="200" min="0" max="999" step="50" title="Offset Latensi Jaringan (ms)" placeholder="Offset ms">
   </div>
-  <div class="hint">Offset ms: Tembak lebih awal (default 200ms) untuk mengompensasi latensi internet & server Google agar respon mendarat tepat pada detik target dan tidak molor ke detik berikutnya.</div>
 
   <div class="row" style="margin-top: 16px;">
     <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
-    <button id="btn_instant" class="btn-action" style="margin-top: 0; background: #0d652d;" onclick="instantSubmit()">Tembak Sekarang</button>
     <button id="btn_cancel" class="btn-action" style="margin-top: 0; background: #c5221f; display: none;" onclick="cancelTimer()">Batal</button>
   </div>
   <div id="status">Status: Silakan paste source HTML form untuk mulai.</div>
@@ -69,8 +71,15 @@
     let wakeLock = null;
     let currentFormMeta = { pageHistory: "0", fbzx: null, fvv: "1" };
 
-    // Cegah tab tertutup secara tidak sengaja saat timer aktif
+    function updateClock() {
+      const el = document.getElementById("clock");
+      if (el) el.innerText = new Date().toTimeString().split(" ")[0];
+    }
+
+    // Cegah tab tertutup secara tidak sengaja saat timer aktif & jalankan jam real-time
     if (typeof window !== "undefined") {
+      updateClock();
+      setInterval(updateClock, 1000);
       window.addEventListener("beforeunload", (e) => {
         if (timer) {
           e.preventDefault();
@@ -477,35 +486,6 @@
       return true;
     }
 
-    function instantSubmit() {
-      const rawUrl = document.getElementById("url").value;
-      const targetUrl = normalizeUrl(rawUrl);
-
-      if (loadedFields.length === 0) {
-        return alert("Silakan paste source HTML form dan klik 'Ekstrak Form' terlebih dahulu!");
-      }
-      if (!targetUrl.startsWith("http")) {
-        return alert("URL Google Form tidak valid!");
-      }
-
-      if (!validateEntries()) return;
-
-      const entries = getEntriesToSubmit();
-      if (entries.length === 0) {
-        return alert("Isi minimal satu kolom jawaban sebelum kirim!");
-      }
-
-      cancelTimer();
-      const { form, searchParams } = preparePayload(targetUrl, entries);
-      dispatchPayload(targetUrl, form, searchParams);
-
-      const statusEl = document.getElementById("status");
-      statusEl.className = "sent";
-      const d = new Date();
-      const nowStr = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-      statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form langsung ditembak pada pukul ${nowStr}.`;
-    }
-
     function startWar() {
       const rawUrl = document.getElementById("url").value;
       const targetUrl = normalizeUrl(rawUrl);
@@ -539,8 +519,7 @@
       const h = parseInt(document.getElementById("h").value, 10);
       const m = parseInt(document.getElementById("m").value, 10);
       const s = parseInt(document.getElementById("s").value, 10);
-      const offsetInput = document.getElementById("offset");
-      const offset = offsetInput ? Math.max(0, parseInt(offsetInput.value, 10) || 0) : 0;
+      const offset = 200; // Kompensasi default 200ms untuk latensi internet & server Google
 
       const now = new Date();
       let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
@@ -577,7 +556,7 @@
         statusEl.className = "sent";
         const d = new Date();
         const sentTime = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}, Offset: ${offset}ms).`;
+        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}).`;
       }
 
       function tick() {
