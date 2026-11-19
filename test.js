@@ -208,19 +208,51 @@ for (const f of parsedWithEmail.fields) {
 assert.deepStrictEqual(emailEntries[0], ["emailAddress", "peserta@gmail.com"]);
 assert.deepStrictEqual(emailEntries[1], ["entry.1111", "Bagus"]);
 
-// Test with live Google Form if available
-const liveFormPath = fs.existsSync(path.join(__dirname, "live_form.html"))
-  ? path.join(__dirname, "live_form.html")
-  : (fs.existsSync("/tmp/live_form.html") ? "/tmp/live_form.html" : null);
+// Test scenario matching 'Diskusi drg Yunita KAMIS' without calling live Google Form
+const mockDrgYunitaForm = `<!DOCTYPE html><html lang="id"><head><title>Diskusi drg Yunita KAMIS</title>
+<script>
+var FB_PUBLIC_LOAD_DATA_ = [null,["Diskusi drg Yunita KAMIS",[
+  [1420017632,"Nama",null,0,[[1981625762,null,1]]],
+  [557996394,"Angkatan",null,0,[[1338481385,null,1]]],
+  [1141890045,"Topik Diskusi",null,0,[[583284138,null,1]]],
+  [2070271628,"Jumlah orang",null,0,[[1621898980,null,1]]],
+  [1231547033,"Diskusi Hari",null,2,[[1862859190,[["KAMIS",null,null,null,0]],1]]]
+],null,null,null,null,null,null,"Diskusi drg Yunita KAMIS",null,[null,null,1,2,null,1,3]],"/forms","Diskusi drg Yunita KAMIS",null,null,null,"",null,0,0,null,"",0,"e/1FAIpQLSfM_hLMUDz-B5fvHJYPg6rmOx3zsZy6sU6TBL3eA-9YJvYJvQ"];
+</script>
+</head><body>
+<div data-params="%.@.[1231547033,&quot;Diskusi Hari&quot;,null,2,[[1862859190,[[&quot;KAMIS&quot;,null,null,null,false]],true]]]]"></div>
+<div data-params="%.@.[557996394,&quot;Angkatan&quot;,null,0,[[1338481385,null,true]]]]"></div>
+<div data-params="%.@.[1420017632,&quot;Nama&quot;,null,0,[[1981625762,null,true]]]]"></div>
+<div data-params="%.@.[1141890045,&quot;Topik Diskusi&quot;,null,0,[[583284138,null,true]]]]"></div>
+<div data-params="%.@.[2070271628,&quot;Jumlah orang&quot;,null,0,[[1621898980,null,true]]]]"></div>
+<input type="email" class="whsOnd zHQkBf" autocomplete="email" disabled required>
+<input type="hidden" name="fvv" value="1">
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="-4115118172904650298">
+</body></html>`;
 
-if (liveFormPath) {
-  const liveFormSource = fs.readFileSync(liveFormPath, "utf8");
-  const parsedLiveForm = parseSourceData(liveFormSource);
-  assert(parsedLiveForm !== null, "Live form must parse successfully");
-  assert.strictEqual(parsedLiveForm.fields.length, 6, "Live form must have exactly 6 fields (email + 5 questions)");
-  assert.strictEqual(parsedLiveForm.fields[0].id, "emailAddress", "Live form first field must be emailAddress");
-  assert.strictEqual(parsedLiveForm.fields[0].type, "email");
-}
+const parsedDrgYunita = parseSourceData(mockDrgYunitaForm);
+assert(parsedDrgYunita !== null, "Drg Yunita scenario must parse successfully");
+assert.strictEqual(parsedDrgYunita.fields.length, 6, "Must have exactly 6 fields (Email + 5 questions)");
+assert.strictEqual(parsedDrgYunita.fields[0].id, "emailAddress", "First field must be emailAddress");
+assert.strictEqual(parsedDrgYunita.fields[0].type, "email");
+assert.strictEqual(parsedDrgYunita.fields[0].required, true);
+assert.strictEqual(parsedDrgYunita.fields[1].id, "entry.1862859190");
+assert.strictEqual(parsedDrgYunita.fields[1].title, "Diskusi Hari");
+assert.strictEqual(parsedDrgYunita.fields[2].id, "entry.1338481385");
+assert.strictEqual(parsedDrgYunita.fields[3].id, "entry.1981625762");
+assert.strictEqual(parsedDrgYunita.fields[4].id, "entry.583284138");
+assert.strictEqual(parsedDrgYunita.fields[5].id, "entry.1621898980");
+assert.strictEqual(parsedDrgYunita.pageHistory, "0");
+assert.strictEqual(parsedDrgYunita.fbzx, "-4115118172904650298");
+assert.strictEqual(parsedDrgYunita.fvv, "1");
+
+// Test resilience against corrupted inputs
+assert.strictEqual(parseSourceData(""), null);
+assert.strictEqual(parseSourceData("https://docs.google.com/forms/d/e/..."), null);
+assert.strictEqual(parseSourceData("FB_PUBLIC_LOAD_DATA_ = [corrupted unclosed JSON"), null);
+assert.strictEqual(parseSourceData("FB_PUBLIC_LOAD_DATA_ = null;"), null);
+assert.strictEqual(parseSourceData("<!DOCTYPE html><html><body>No data here</body></html>"), null);
 
 // Test mandatory multiple-choice field WITHOUT Other option (user's exact bug scenario)
 const mockMandatoryChoice = `FB_PUBLIC_LOAD_DATA_ = [null,["TEST",[
@@ -262,4 +294,44 @@ assert.strictEqual(parsedShuffled.fields[0].title, "kedua_asli");
 assert.strictEqual(parsedShuffled.fields[1].id, "entry.111");
 assert.strictEqual(parsedShuffled.fields[1].title, "pertama_asli");
 
-console.log("All unit tests, Other-option checks, Email-field checks, and Shuffled-DOM checks passed!");
+// Dynamic Email Detection & Payload Test
+// Case A: Form strictly WITHOUT email collection
+const mockStrictNoEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Tanpa Email",[
+  [100,"Nama Lengkap",null,0,[[1001,null,1]]],
+  [200,"Alamat",null,0,[[2001,null,1]]]
+],null,null,null,null,null,null,null,null,[null,null,0,0]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScNoEmail"];</script>
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="12345">
+<input type="hidden" name="fvv" value="1">`;
+
+const parsedNoEmail = parseSourceData(mockStrictNoEmail);
+assert.strictEqual(parsedNoEmail.fields.length, 2, "Form without email must only have the 2 questions");
+assert.strictEqual(parsedNoEmail.fields.some(f => f.id === "emailAddress"), false, "Must not contain emailAddress");
+const noEmailPayloadEntries = mockGetEntries(parsedNoEmail.fields, { "entry.1001": "Budi", "entry.2001": "Jakarta" });
+assert.strictEqual(noEmailPayloadEntries.some(e => e[0] === "emailAddress"), false, "Payload must not contain emailAddress");
+assert.deepStrictEqual(noEmailPayloadEntries, [["entry.1001", "Budi"], ["entry.2001", "Jakarta"]]);
+
+// Case B: Form WITH email collection
+const mockStrictWithEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Ada Email",[
+  [100,"Nama Lengkap",null,0,[[1001,null,1]]]
+],null,null,null,null,null,null,null,null,[null,null,1,2]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="12345">
+<input type="hidden" name="fvv" value="1">`;
+
+const parsedWithEmailStrict = parseSourceData(mockStrictWithEmail);
+assert.strictEqual(parsedWithEmailStrict.fields.length, 2, "Form with email must have email + question");
+assert.strictEqual(parsedWithEmailStrict.fields[0].id, "emailAddress");
+assert.strictEqual(parsedWithEmailStrict.fields[0].type, "email");
+const withEmailPayloadEntries = mockGetEntries(parsedWithEmailStrict.fields, { "emailAddress": "user@gmail.com", "entry.1001": "Budi" });
+assert.deepStrictEqual(withEmailPayloadEntries, [["emailAddress", "user@gmail.com"], ["entry.1001", "Budi"]]);
+
+// Stress test: 100 rapid parses
+for (let i = 0; i < 100; i++) {
+  const p1 = parseSourceData(mockStrictNoEmail);
+  const p2 = parseSourceData(mockStrictWithEmail);
+  assert.strictEqual(p1.fields.length, 2);
+  assert.strictEqual(p2.fields.length, 2);
+}
+
+console.log("All unit tests, Other-option checks, Email-field checks, Dynamic Email checks, and Shuffled-DOM checks passed!");

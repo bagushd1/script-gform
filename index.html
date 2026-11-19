@@ -505,15 +505,30 @@
               alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
               return false;
             }
+          } else if (f.required && !el.value.trim()) {
+            alert(`Pilih salah satu opsi untuk kolom wajib: "${f.title}"!`);
+            return false;
           }
         } else if (f.type === "checkbox") {
+          const checked = document.querySelectorAll(`input[name="chk_${f.id}"]:checked`);
           const otherCb = document.getElementById(`chk_other_toggle_${f.id}`);
-          if (otherCb && otherCb.checked) {
+          const hasOtherChecked = otherCb && otherCb.checked;
+          if (f.required && checked.length === 0 && !hasOtherChecked) {
+            alert(`Pilih minimal satu opsi untuk kolom wajib: "${f.title}"!`);
+            return false;
+          }
+          if (hasOtherChecked) {
             const otherEl = document.getElementById(`other_${f.id}`);
             if (!otherEl || !otherEl.value.trim()) {
               alert(`Kolom teks "${f.title}" (Yang lain) wajib diisi jika memilih opsi tersebut!`);
               return false;
             }
+          }
+        } else if (f.type !== "file") {
+          const el = document.getElementById(`input_${f.id}`);
+          if (f.required && (!el || !el.value.trim())) {
+            alert(`Kolom wajib diisi: "${f.title}"!`);
+            return false;
           }
         }
       }
