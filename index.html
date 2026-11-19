@@ -519,7 +519,8 @@
       const h = parseInt(document.getElementById("h").value, 10);
       const m = parseInt(document.getElementById("m").value, 10);
       const s = parseInt(document.getElementById("s").value, 10);
-      const offset = 200; // Kompensasi default 200ms untuk latensi internet & server Google
+      // shortcut: offset 0ms agar mendarat tepat >= detik target (mencegah diskualifikasi sebelum detik 00)
+      const offset = 0;
 
       const now = new Date();
       let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
