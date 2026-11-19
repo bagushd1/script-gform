@@ -215,4 +215,31 @@ if (fs.existsSync("/tmp/live_form.html")) {
   assert.strictEqual(parsedLiveForm.fields.some(f => f.id === "emailAddress"), false, "Live form must not have emailAddress");
 }
 
+// Test mandatory multiple-choice field WITHOUT Other option (user's exact bug scenario)
+const mockMandatoryChoice = `FB_PUBLIC_LOAD_DATA_ = [null,["TEST",[
+  [111,"pilgan",null,2,[[101,[["A",null,null,null,0],["B",null,null,null,0],["",null,null,null,1]],0]]],
+  [222,"pilgan mandatory",null,2,[[102,[["A",null,null,null,0],["B",null,null,null,0],["",null,null,null,1]],1]]],
+  [333,"pilgan non lainnya",null,2,[[103,[["A",null,null,null,0],["B",null,null,null,0]],0]]],
+  [444,"pilgan mandatory non lainnya",null,2,[[104,[["A",null,null,null,0],["B",null,null,null,0]],1]]]
+]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScMockChoice"];</script>`;
+
+const parsedChoice = parseSourceData(mockMandatoryChoice);
+assert.strictEqual(parsedChoice.fields[0].title, "pilgan");
+assert.strictEqual(parsedChoice.fields[0].hasOther, true);
+assert.strictEqual(parsedChoice.fields[1].title, "pilgan mandatory");
+assert.strictEqual(parsedChoice.fields[1].hasOther, true);
+assert.strictEqual(parsedChoice.fields[2].title, "pilgan non lainnya");
+assert.strictEqual(parsedChoice.fields[2].hasOther, false);
+assert.strictEqual(parsedChoice.fields[3].title, "pilgan mandatory non lainnya");
+assert.strictEqual(parsedChoice.fields[3].hasOther, false, "Mandatory question without other must NOT have hasOther=true");
+
+if (fs.existsSync("/tmp/gform.html")) {
+  const gformSource = fs.readFileSync("/tmp/gform.html", "utf8");
+  const parsedGForm = parseSourceData(gformSource);
+  assert(parsedGForm !== null);
+  const lastField = parsedGForm.fields[parsedGForm.fields.length - 1];
+  assert.strictEqual(lastField.title, "pilgan mandatory non lainnya");
+  assert.strictEqual(lastField.hasOther, false, "Last field of user's form must NOT have hasOther=true");
+}
+
 console.log("All unit tests and Other-option checks passed!");

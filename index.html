@@ -40,12 +40,14 @@
     <div id="dynamic-fields"></div>
   </div>
 
-  <label>3. Waktu Tembak (Jam : Menit : Detik):</label>
+  <label>3. Waktu Tembak (Jam : Menit : Detik : Offset ms):</label>
   <div class="row">
-    <input id="h" type="number" value="8" min="0" max="23">
-    <input id="m" type="number" value="0" min="0" max="59">
-    <input id="s" type="number" value="0" min="0" max="59">
+    <input id="h" type="number" value="7" min="0" max="23" title="Jam">
+    <input id="m" type="number" value="0" min="0" max="59" title="Menit">
+    <input id="s" type="number" value="0" min="0" max="59" title="Detik">
+    <input id="offset" type="number" value="200" min="0" max="999" step="50" title="Offset Latensi Jaringan (ms)" placeholder="Offset ms">
   </div>
+  <div class="hint">Offset ms: Tembak lebih awal (default 200ms) untuk mengompensasi latensi internet & server Google agar respon mendarat tepat pada detik target dan tidak molor ke detik berikutnya.</div>
 
   <div class="row" style="margin-top: 16px;">
     <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
@@ -133,7 +135,7 @@
             if (!item) return;
             const entryId = item[0];
             const rawOptions = item[1];
-            const hasOther = Array.isArray(rawOptions) && (item[2] === 1 || rawOptions.some(o => o[4] === 1 || !o[0]));
+            const hasOther = Array.isArray(rawOptions) && rawOptions.some(o => o[4] === 1 || !o[0]);
             const options = Array.isArray(rawOptions)
               ? rawOptions.filter(o => o[0] && o[4] !== 1).map(o => o[0])
               : null;
@@ -158,7 +160,8 @@
               title,
               type,
               options,
-              hasOther
+              hasOther,
+              required: item[2] === 1
             });
           });
         });
@@ -498,7 +501,8 @@
 
       const statusEl = document.getElementById("status");
       statusEl.className = "sent";
-      const nowStr = new Date().toTimeString().split(" ")[0];
+      const d = new Date();
+      const nowStr = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
       statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form langsung ditembak pada pukul ${nowStr}.`;
     }
 
@@ -535,6 +539,8 @@
       const h = parseInt(document.getElementById("h").value, 10);
       const m = parseInt(document.getElementById("m").value, 10);
       const s = parseInt(document.getElementById("s").value, 10);
+      const offsetInput = document.getElementById("offset");
+      const offset = offsetInput ? Math.max(0, parseInt(offsetInput.value, 10) || 0) : 0;
 
       const now = new Date();
       let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, s, 0);
@@ -544,6 +550,7 @@
         }
       }
       const targetMs = targetDate.getTime();
+      const fireMs = targetMs - offset;
       const targetTimeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 
       const btn = document.getElementById("btn");
@@ -558,51 +565,69 @@
       requestWakeLock();
       if (audioEl) audioEl.play().catch(() => {});
 
+      let prewarmed3s = false;
+      let prewarmed1s = false;
+      let tightIntervalStarted = false;
+
       function executeSubmit() {
         if (submitted) return;
         submitted = true;
         cancelTimer();
         dispatchPayload(targetUrl, form, searchParams);
         statusEl.className = "sent";
-        const sentTime = new Date().toTimeString().split(" ")[0];
-        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form otomatis ditembak pada pukul ${sentTime}.`;
+        const d = new Date();
+        const sentTime = `${d.toTimeString().split(" ")[0]}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+        statusEl.innerHTML = `&#10004; <strong>Terkirim kencang!</strong> Form ditembak pada pukul <strong>${sentTime}</strong> (Target: ${targetTimeStr}, Offset: ${offset}ms).`;
       }
 
       function tick() {
-        const remaining = targetMs - Date.now();
-        if (remaining <= 0) {
+        const remainingToFire = fireMs - Date.now();
+        if (remainingToFire <= 0) {
           executeSubmit();
           return;
         }
 
-        if (remaining > 1000) {
-          const remSec = Math.floor(remaining / 1000);
+        // Pre-warm TCP+TLS saat mendekati waktu tembak agar socket siap tanpa delay
+        if (remainingToFire <= 3000 && !prewarmed3s) {
+          prewarmed3s = true;
+          try { fetch(targetUrl, { method: "HEAD", mode: "no-cors" }).catch(() => {}); } catch (e) {}
+        }
+        if (remainingToFire <= 1000 && !prewarmed1s) {
+          prewarmed1s = true;
+          try { fetch(targetUrl, { method: "HEAD", mode: "no-cors" }).catch(() => {}); } catch (e) {}
+        }
+
+        if (remainingToFire > 1500) {
+          const remSec = Math.floor(remainingToFire / 1000);
           const remH = Math.floor(remSec / 3600);
           const remM = Math.floor((remSec % 3600) / 60);
           const remS = remSec % 60;
           statusEl.innerHTML = `<span class="pulse-dot"></span>Timer Aktif &bull; Target: <strong>${targetTimeStr}</strong> (Sisa: ${String(remH).padStart(2, '0')}:${String(remM).padStart(2, '0')}:${String(remS).padStart(2, '0')})`;
         } else {
-          if (timer) { clearInterval(timer); timer = null; }
-          statusEl.innerHTML = `<span class="pulse-dot"></span>Bersiap tembak <strong>${targetTimeStr}</strong>... (${remaining}ms)`;
+          statusEl.innerHTML = `<span class="pulse-dot"></span>Bersiap tembak <strong>${targetTimeStr}</strong>... (${remainingToFire}ms)`;
 
-          // Fallback timer jika frame tertunda
-          setTimeout(executeSubmit, Math.max(0, targetMs - Date.now()));
+          // Masuk fase kritis (< 1.5 detik): tingkatkan frekuensi interval agar tahan throttle background
+          if (!tightIntervalStarted) {
+            tightIntervalStarted = true;
+            if (timer) clearInterval(timer);
+            timer = setInterval(tick, 10);
+            setTimeout(executeSubmit, Math.max(0, remainingToFire));
 
-          // Ultra-tight loop untuk presisi sub-milidetik tepat di detik target
-          function tightLoop() {
-            if (Date.now() >= targetMs) {
-              executeSubmit();
-            } else if (!submitted) {
-              rafId = requestAnimationFrame(tightLoop);
+            function tightLoop() {
+              if (Date.now() >= fireMs) {
+                executeSubmit();
+              } else if (!submitted) {
+                rafId = requestAnimationFrame(tightLoop);
+              }
             }
+            tightLoop();
           }
-          tightLoop();
         }
       }
 
       tick();
-      if (!submitted && Date.now() < targetMs - 1000) {
-        timer = setInterval(tick, 100);
+      if (!submitted && Date.now() < fireMs) {
+        timer = setInterval(tick, 50);
       }
     }
 
