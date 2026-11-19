@@ -41,6 +41,7 @@ assert.strictEqual(parsed.pageHistory, "0,1,2");
 assert.strictEqual(parsed.fbzx, "-123456789");
 assert.strictEqual(parsed.fvv, "1");
 assert.strictEqual(parsed.fields.length, 8);
+assert.strictEqual(parsed.fields.some(f => f.id === "emailAddress"), false);
 
 assert.strictEqual(parsed.fields[0].id, "entry.888");
 assert.strictEqual(parsed.fields[0].title, "nama");
@@ -177,4 +178,17 @@ const emailEntries = mockGetEntries(parsedEmail.fields, emailDom);
 assert.deepStrictEqual(emailEntries[0], ["emailAddress", "user@example.com"]);
 assert.deepStrictEqual(emailEntries[1], ["entry.888", "Budi"]);
 
-console.log("All unit tests, Other-option checks, and Email-field checks passed!");
+// Test question shuffle sorting by DOM order
+const mockShuffledSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[
+  [1,"pertama_asli",null,0,[[111,null,0]]],
+  [2,"kedua_asli",null,0,[[222,null,0]]]
+]],null,null,null,null,null,null,null,null,null,null,null,null,"e/mockPath"];</script>
+<div data-params="%.@.[2,&quot;kedua_asli&quot;,null,0,[[222,null,0]]]]"></div>
+<div data-params="%.@.[1,&quot;pertama_asli&quot;,null,0,[[111,null,0]]]]"></div>`;
+const parsedShuffled = parseSourceData(mockShuffledSource);
+assert.strictEqual(parsedShuffled.fields[0].id, "entry.222");
+assert.strictEqual(parsedShuffled.fields[0].title, "kedua_asli");
+assert.strictEqual(parsedShuffled.fields[1].id, "entry.111");
+assert.strictEqual(parsedShuffled.fields[1].title, "pertama_asli");
+
+console.log("All unit tests, Other-option checks, Email-field checks, and Shuffled-DOM checks passed!");
