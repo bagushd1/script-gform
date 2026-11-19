@@ -370,4 +370,16 @@ dispatchPayload("https://example.com/formResponse", mockForm, new URLSearchParam
 assert.strictEqual(fetchCallCount, 1, "Must call fetch exactly once (Single Shot)");
 assert.strictEqual(formSubmitCount, 0, "Form submit fallback must NOT be called when fetch succeeds");
 
-console.log("All unit tests, Other-option checks, Email-field checks, Dynamic Email checks, Shuffled-DOM checks, and Single Shot checks passed!");
+// Tests for war.js (Cloud Shell CLI runner)
+const { parseTargetTime } = require("./war.js");
+const futureDate = parseTargetTime("23:59:59");
+assert(futureDate instanceof Date);
+assert.strictEqual(futureDate.getHours(), 23);
+assert.strictEqual(futureDate.getMinutes(), 59);
+assert.strictEqual(futureDate.getSeconds(), 59);
+
+const pastDate = parseTargetTime("00:00:01");
+assert(pastDate instanceof Date);
+assert(pastDate.getTime() > Date.now(), "Past time should be scheduled for tomorrow");
+
+console.log("All unit tests, Other-option checks, Email-field checks, Dynamic Email checks, Shuffled-DOM checks, Single Shot checks, and war.js tests passed!");

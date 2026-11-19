@@ -35,6 +35,24 @@ A lightweight, 100% client-side tool designed to automatically submit Google For
 4. Fill in your answers, set the scheduled time, and tap **Pasang Timer**.
 5. **Note:** Keep the browser tab open and active on screen until the target time arrives.
 
+### 3. On Google Cloud Shell (Ultra-Low Latency & TrueTime Precision)
+
+Run directly inside Google's datacenter (~1-3ms latency, TrueTime NTP, zero dependencies):
+
+1. Open `index.html` on your browser, paste the form source, fill in answers & set target time.
+2. Click **Ekspor Config Cloud Shell** to download `config.json`.
+3. Open [shell.cloud.google.com](https://shell.cloud.google.com) (free, no credit card required).
+4. Clone this repo:
+   ```bash
+   git clone https://github.com/bagushd1/script-gform.git
+   cd script-gform
+   ```
+5. Upload or place your `config.json` in the folder, then run:
+   ```bash
+   node war.js
+   ```
+6. The CLI displays the real-time countdown, performs socket pre-warming at T-5s, and blasts the payload at the exact target second.
+
 ---
 
 ## Running Self-Checks

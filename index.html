@@ -61,6 +61,7 @@
   <div class="row" style="margin-top: 16px;">
     <button id="btn" class="btn-main" style="margin-top: 0;" onclick="startWar()">Pasang Timer</button>
     <button id="btn_cancel" class="btn-action" style="margin-top: 0; background: #c5221f; display: none;" onclick="cancelTimer()">Batal</button>
+    <button id="btn_export" class="btn-action" style="margin-top: 0; background: #1a73e8; display: none;" onclick="exportCloudShellConfig()">Ekspor Config Cloud Shell</button>
   </div>
   <div id="status">Status: Silakan paste source HTML form untuk mulai.</div>
 
@@ -338,6 +339,8 @@
         }
         currentFormMeta = { pageHistory: parsed.pageHistory, fbzx: parsed.fbzx, fvv: parsed.fvv };
         renderDynamicFields(parsed.fields);
+        const expBtn = document.getElementById("btn_export");
+        if (expBtn) expBtn.style.display = "inline-block";
         statusEl.className = "";
         statusEl.innerText = `Berhasil mengekstrak ${parsed.fields.length} pertanyaan! Silakan isi jawaban di bawah.`;
         saveState();
@@ -516,6 +519,38 @@
         }
       }
       return entries;
+    }
+
+    function exportCloudShellConfig() {
+      const urlInput = document.getElementById("url").value.trim();
+      const targetUrl = urlInput ? normalizeUrl(urlInput) : "";
+      if (!targetUrl) {
+        alert("Silakan ekstrak form terlebih dahulu!");
+        return;
+      }
+      const h = String(document.getElementById("h").value).padStart(2, "0");
+      const m = String(document.getElementById("m").value).padStart(2, "0");
+      const s = String(document.getElementById("s").value).padStart(2, "0");
+      const targetTime = `${h}:${m}:${s}`;
+      const entries = getEntriesToSubmit();
+
+      const configData = {
+        targetUrl: targetUrl,
+        targetTime: targetTime,
+        pageHistory: currentFormMeta.pageHistory || "0",
+        fbzx: currentFormMeta.fbzx || null,
+        fvv: currentFormMeta.fvv || "1",
+        entries: entries
+      };
+
+      const blob = new Blob([JSON.stringify(configData, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "config.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
     }
 
     let rafId = null;
