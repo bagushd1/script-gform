@@ -163,20 +163,85 @@ assert.deepStrictEqual(resultEntries[14], ["entry.444", "08:30"]);
 assert.deepStrictEqual(resultEntries[15], ["entry.331", "bagus"]);
 assert.deepStrictEqual(resultEntries[16], ["entry.332", "kurang"]);
 
-// Test native email collection detection
-const mockEmailSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[[1,"nama",null,0,[[888,null,0]]]]],null,null,null,null,null,null,null,null,null,null,null,null,"e/mockPath"];</script>
-<input type="email" autocomplete="email" aria-label="Email Anda">`;
-const parsedEmail = parseSourceData(mockEmailSource);
-assert.strictEqual(parsedEmail.fields.length, 2);
-assert.strictEqual(parsedEmail.fields[0].id, "emailAddress");
-assert.strictEqual(parsedEmail.fields[0].title, "Email");
-assert.strictEqual(parsedEmail.fields[0].type, "email");
-assert.strictEqual(parsedEmail.fields[1].id, "entry.888");
+// Test form WITHOUT mandatory email (user's exact form scenario)
+const mockUserFormWithoutEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["TESTING YAA BUAT INTROSPEKSI",[[1264001826,"NAMA",null,0,[[275845556,null,0]],null,null,null,null,null,null,[null,"NAMA"]],[680201235,"APAKAH ANDA PERLU INTROSPEKSI?",null,2,[[22182892,[["YA",null,null,null,0],["TIDAK",null,null,null,0],["",null,null,null,1]],0,null,null,null,null,null,0]],null,null,null,null,null,null,[null,"APAKAH ANDA PERLU INTROSPEKSI?"]],[1371850537,"senin",null,2,[[53080948,[["pagi",null,null,null,0],["siang",null,null,null,0]],0,null,null,null,null,null,0]],null,null,null,null,null,null,[null,"senin"]],[1689090906,"selasa",null,2,[[1726004270,[["pagi",null,null,null,0],["siang",null,null,null,0]],0,null,null,null,null,null,0]],null,null,null,null,null,null,[null,"selasa"]]],null,null,null,null,null,null,"TESTING LAINNYA",76,[null,null,null,2,null,null,1],null,null,null,null,[2],null,null,null,null,null,null,null,null,[null,"TESTING YAA BUAT INTROSPEKSI"],[null,"TESTING LAINNYA"]],"/forms","Formulir tanpa judul",null,null,null,"",null,0,0,null,"",0,"e/1FAIpQLSfmK5RqFe6XYSp2RK5DP5FcpswXYBSm-N1wpGIAvh24nnKMuA",0,"[]",0,0,1];</script>
+<span class="EbMsme">bagushd123@gmail.com</span>
+<div class="Q99PAd">Tidak dibagikan</div>
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="-6852217254300239888">
+<input type="hidden" name="fvv" value="1">`;
 
-const emailDom = { "emailAddress": "user@example.com", "entry.888": "Budi" };
-const emailEntries = mockGetEntries(parsedEmail.fields, emailDom);
-assert.deepStrictEqual(emailEntries[0], ["emailAddress", "user@example.com"]);
-assert.deepStrictEqual(emailEntries[1], ["entry.888", "Budi"]);
+const parsedUserForm = parseSourceData(mockUserFormWithoutEmail);
+assert.strictEqual(parsedUserForm.fields.length, 4, "Must only have 4 fields, no false positive email!");
+assert.strictEqual(parsedUserForm.fields.some(f => f.id === "emailAddress"), false, "Must NOT contain emailAddress field!");
+assert.strictEqual(parsedUserForm.fields[0].title, "NAMA");
+assert.strictEqual(parsedUserForm.fields[1].title, "APAKAH ANDA PERLU INTROSPEKSI?");
+assert.strictEqual(parsedUserForm.fields[2].title, "senin");
+assert.strictEqual(parsedUserForm.fields[3].title, "selasa");
+
+// Test form WITH mandatory email collection (name="emailAddress")
+const mockFormWithMandatoryEmail = `FB_PUBLIC_LOAD_DATA_ = [null,["Form Dengan Email",[
+  [1,"Nama Lengkap",null,0,[[1111,null,0]]]
+]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScWithEmail"];</script>
+<input type="email" name="emailAddress" class="whsOnd" required>
+<input type="hidden" name="pageHistory" value="0">
+<input type="hidden" name="fbzx" value="999888">`;
+
+const parsedWithEmail = parseSourceData(mockFormWithMandatoryEmail);
+assert.strictEqual(parsedWithEmail.fields.length, 2, "Must have 2 fields (email + nama)");
+assert.strictEqual(parsedWithEmail.fields[0].id, "emailAddress", "First field must be emailAddress");
+assert.strictEqual(parsedWithEmail.fields[0].type, "email");
+assert.strictEqual(parsedWithEmail.fields[0].required, true);
+assert.strictEqual(parsedWithEmail.fields[1].id, "entry.1111");
+
+// Test payload generation when emailAddress is present
+const testEmailDom = {
+  "emailAddress": "peserta@gmail.com",
+  "entry.1111": "Bagus"
+};
+const emailEntries = [];
+for (const f of parsedWithEmail.fields) {
+  const val = testEmailDom[f.id];
+  if (val) emailEntries.push([f.id, val]);
+}
+assert.deepStrictEqual(emailEntries[0], ["emailAddress", "peserta@gmail.com"]);
+assert.deepStrictEqual(emailEntries[1], ["entry.1111", "Bagus"]);
+
+// Test with live Google Form if available
+if (fs.existsSync("/tmp/live_form.html")) {
+  const liveFormSource = fs.readFileSync("/tmp/live_form.html", "utf8");
+  const parsedLiveForm = parseSourceData(liveFormSource);
+  assert(parsedLiveForm !== null, "Live form must parse successfully");
+  assert.strictEqual(parsedLiveForm.fields.length, 4, "Live form must have exactly 4 fields");
+  assert.strictEqual(parsedLiveForm.fields.some(f => f.id === "emailAddress"), false, "Live form must not have emailAddress");
+}
+
+// Test mandatory multiple-choice field WITHOUT Other option (user's exact bug scenario)
+const mockMandatoryChoice = `FB_PUBLIC_LOAD_DATA_ = [null,["TEST",[
+  [111,"pilgan",null,2,[[101,[["A",null,null,null,0],["B",null,null,null,0],["",null,null,null,1]],0]]],
+  [222,"pilgan mandatory",null,2,[[102,[["A",null,null,null,0],["B",null,null,null,0],["",null,null,null,1]],1]]],
+  [333,"pilgan non lainnya",null,2,[[103,[["A",null,null,null,0],["B",null,null,null,0]],0]]],
+  [444,"pilgan mandatory non lainnya",null,2,[[104,[["A",null,null,null,0],["B",null,null,null,0]],1]]]
+]],null,null,null,null,null,null,null,null,null,null,null,null,"e/1FAIpQLScMockChoice"];</script>`;
+
+const parsedChoice = parseSourceData(mockMandatoryChoice);
+assert.strictEqual(parsedChoice.fields[0].title, "pilgan");
+assert.strictEqual(parsedChoice.fields[0].hasOther, true);
+assert.strictEqual(parsedChoice.fields[1].title, "pilgan mandatory");
+assert.strictEqual(parsedChoice.fields[1].hasOther, true);
+assert.strictEqual(parsedChoice.fields[2].title, "pilgan non lainnya");
+assert.strictEqual(parsedChoice.fields[2].hasOther, false);
+assert.strictEqual(parsedChoice.fields[3].title, "pilgan mandatory non lainnya");
+assert.strictEqual(parsedChoice.fields[3].hasOther, false, "Mandatory question without other must NOT have hasOther=true");
+
+if (fs.existsSync("/tmp/gform.html")) {
+  const gformSource = fs.readFileSync("/tmp/gform.html", "utf8");
+  const parsedGForm = parseSourceData(gformSource);
+  assert(parsedGForm !== null);
+  const lastField = parsedGForm.fields[parsedGForm.fields.length - 1];
+  assert.strictEqual(lastField.title, "pilgan mandatory non lainnya");
+  assert.strictEqual(lastField.hasOther, false, "Last field of user's form must NOT have hasOther=true");
+}
 
 // Test question shuffle sorting by DOM order
 const mockShuffledSource = `FB_PUBLIC_LOAD_DATA_ = [null,["t",[
